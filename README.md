@@ -1,8 +1,40 @@
-# Mineradio
+# Mineradio for Linux
 
 ![Mineradio 暗场启动页](./docs/assets/readme/cinema-beat-smoke.png)
 
-Mineradio 是一款 Windows 桌面沉浸式音乐播放器，把天气电台、搜索播放、歌词舞台、粒子视觉和 3D 歌单架组合成一个更接近现场感的私人音乐空间。
+> **Linux x86 适配版** — 基于 [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio)，由 [jade2-fff](https://github.com/jade2-fff) 移植，保持与上游同步更新。
+
+Mineradio 是一款沉浸式音乐播放器，把天气电台、搜索播放、歌词舞台、粒子视觉和 3D 歌单架组合成一个更接近现场感的私人音乐空间。本仓库是针对 Linux x86_64 平台的适配版本。
+
+## Linux 适配说明
+
+- **构建目标**：AppImage + deb（x64）
+- **GPU 渲染**：Windows d3d11 → Linux OpenGL + Wayland 自适应（ozone）
+- **已适配**：窗口图标、更新选包、AppImage 自动 chmod+启动、节奏缓存目录跨平台化
+- **已知降级**（不影响核心播放）：
+  - 桌面歌词中键全局解锁（依赖 Windows PowerShell，Linux 上静默跳过）
+  - 壁纸嵌入桌面图标层（依赖 Win32 WorkerW API，Linux 上静默跳过）
+
+### 推荐安装字体
+
+```bash
+sudo apt install fonts-noto-cjk fonts-inter
+```
+
+## 同步上游更新
+
+本项目保持与原作者仓库 [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio) 同步。当上游有新版本发布时，执行以下命令拉取合并：
+
+```bash
+git fetch upstream
+git merge upstream/main
+# 如有冲突，手动解决后：
+# git add .
+# git commit
+git push origin main
+```
+
+## 原版 Windows 下载
 
 ## 立即下载 Windows 安装包
 
@@ -69,11 +101,21 @@ Windows 用户可以在 GitHub Releases 中下载安装包。
 
 ```bash
 npm install
+
+# 开发模式启动
 npm start
+
+# Windows 构建
 npm run build:win
+
+# Linux 构建（AppImage + deb）
+npm run build:linux
+
+# Linux 仅打包目录（调试用，更快）
+npm run build:linux:dir
 ```
 
-桌面版入口由 Electron 主进程加载本地服务。`npm run build:win` 会生成 Windows NSIS 安装包，产物位于 `dist/`。
+桌面版入口由 Electron 主进程加载本地服务。`npm run build:win` 会生成 Windows NSIS 安装包，`npm run build:linux` 会生成 AppImage 和 deb 安装包，产物均位于 `dist/`。
 
 ## 更新机制
 
