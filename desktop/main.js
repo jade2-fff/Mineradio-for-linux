@@ -102,7 +102,10 @@ const APP_PACKAGE_INFO = (() => {
 const APP_METADATA = APP_PACKAGE_INFO.mineradio || {};
 const APP_NAME = process.env.MINERADIO_RUNTIME_NAME || APP_METADATA.runtimeName || APP_PACKAGE_INFO.productName || 'Mineradio';
 const APP_USER_MODEL_ID = process.env.MINERADIO_APP_USER_MODEL_ID || APP_METADATA.appUserModelId || (APP_PACKAGE_INFO.build && APP_PACKAGE_INFO.build.appId) || 'com.mineradio.desktop';
-const APP_ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico');
+// 窗口图标按平台选择：Windows 用 .ico，其它平台（Linux/macOS）用 .png。
+const APP_ICON_ICO = process.platform === 'win32'
+  ? path.join(__dirname, '..', 'build', 'icon.ico')
+  : path.join(__dirname, '..', 'build', 'icon.png');
 const CURRENT_FX_AUTOSAVE_FILE = 'current-fx-autosave.json';
 const CURRENT_FX_AUTOSAVE_MAX_BYTES = 12 * 1024 * 1024;
 const STARTUP_ERROR_LOG_FILE = 'startup-error.log';
@@ -481,7 +484,8 @@ const CHROMIUM_SAFE_PERFORMANCE_SWITCHES = [
   ['enable-oop-rasterization'],
   ['enable-zero-copy'],
   ['enable-accelerated-2d-canvas'],
-  ['use-angle', 'd3d11'],
+  // Angle 后端按平台选择：Windows 用 d3d11，Linux 优先 OpenGL（兼容性最稳）。
+  ['use-angle', process.platform === 'win32' ? 'd3d11' : 'gl'],
 ];
 const CHROMIUM_OPT_IN_PERFORMANCE_SWITCHES = [
   ['ignore-gpu-blocklist', null, 'MINERADIO_IGNORE_GPU_BLOCKLIST'],
@@ -497,6 +501,15 @@ function appendChromiumSwitch(name, value) {
 for (const [name, value] of CHROMIUM_SAFE_PERFORMANCE_SWITCHES) appendChromiumSwitch(name, value);
 for (const [name, value, envName] of CHROMIUM_OPT_IN_PERFORMANCE_SWITCHES) {
   if (process.env[envName] === '1') appendChromiumSwitch(name, value);
+}
+
+// Linux 下让 Electron/X11 应用在不同会话（X11 / Wayland）下都能正常合成透明窗口。
+// 当会话是 Wayland 时用 wayland 后端，否则回落到默认 X11。
+if (process.platform === 'linux') {
+  if (process.env.XDG_SESSION_TYPE === 'wayland' || !!(process.env.WAYLAND_DISPLAY)) {
+    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+    app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform,WaylandWindowDecorations');
+  }
 }
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 

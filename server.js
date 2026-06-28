@@ -137,7 +137,13 @@ const DEFAULT_COOKIE_FILE = path.join(__dirname, '.cookie');
 const DEFAULT_QQ_COOKIE_FILE = path.join(__dirname, '.qq-cookie');
 const DEFAULT_KUGOU_COOKIE_FILE = path.join(__dirname, '.kugou-cookie');
 const DEFAULT_QISHUI_COOKIE_FILE = path.join(__dirname, '.qishui-cookie');
-const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || 'D:\\MineradioCache\\beatmaps';
+// 节奏分析缓存目录：优先用环境变量覆盖，否则按平台放在用户数据目录下，
+// 避免硬编码 Windows 盘符路径在 Linux/macOS 上失效。
+const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || (
+  process.platform === 'win32'
+    ? 'D:\\MineradioCache\\beatmaps'
+    : path.join(require('os').homedir(), '.cache', 'mineradio', 'beatmaps')
+);
 const CUEFIELD_FEEDBACK_FILE = process.env.CUEFIELD_FEEDBACK_FILE || path.join(__dirname, 'data', 'cuefield-feedback.jsonl');
 const LISTEN_SYNC_JOURNAL_FILE = process.env.MINERADIO_LISTEN_SYNC_FILE || path.join(__dirname, 'data', 'listen-sync-journal.json');
 const LISTEN_SYNC_JOURNAL_LIMIT = 600;
