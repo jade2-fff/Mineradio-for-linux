@@ -6,6 +6,15 @@
 
 Mineradio 是一款沉浸式音乐播放器，把天气电台、搜索播放、歌词舞台、粒子视觉和 3D 歌单架组合成一个更接近现场感的私人音乐空间。本仓库是针对 Linux x86_64 平台的适配版本。
 
+## 立即下载 Linux 版
+
+| 安装方式 | 适用发行版 | 下载 |
+| --- | --- | --- |
+| AppImage（免安装，推荐） | 所有主流发行版 | [Mineradio-1.1.1-x86_64.AppImage](https://github.com/jade2-fff/Mineradio-for-linux/releases/download/v1.1.1/Mineradio-1.1.1-x86_64.AppImage) |
+| deb 包 | Debian / Ubuntu / 深度 | [Mineradio-1.1.1-amd64.deb](https://github.com/jade2-fff/Mineradio-for-linux/releases/download/v1.1.1/Mineradio-1.1.1-amd64.deb) |
+
+> [查看所有 Release](https://github.com/jade2-fff/Mineradio-for-linux/releases)
+
 ## Linux 适配说明
 
 - **构建目标**：AppImage + deb（x64）
