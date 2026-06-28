@@ -34,6 +34,61 @@ git merge upstream/main
 git push origin main
 ```
 
+## Linux 安装
+
+有两种安装方式，按需选择：
+
+### 方式一：AppImage（免安装，推荐）
+
+AppImage 是单个可执行文件，下载后赋予执行权限即可双击运行，无需安装。
+
+```bash
+# 下载后赋予执行权限（文件名以实际 Release 为准）
+chmod +x Mineradio-1.1.1-x86_64.AppImage
+
+# 运行
+./Mineradio-1.1.1-x86_64.AppImage
+```
+
+> 如果双击无法运行，可能是文件管理器未启用「允许执行」，在文件属性里勾选「作为程序执行」即可。
+
+### 方式二：deb 包（系统安装，适合 Debian/Ubuntu 系）
+
+```bash
+# 安装
+sudo dpkg -i Mineradio-1.1.1-x64.deb
+
+# 如提示缺少依赖，补一下再安装
+sudo apt-get install -f
+
+# 安装后从应用菜单启动 Mineradio，或命令行运行
+mineradio
+```
+
+安装包会自动注册到系统应用菜单，卸载使用 `sudo apt remove mineradio`。
+
+### 系统依赖
+
+基于 Electron 的应用需要以下运行库，大多数桌面发行版已默认包含，缺失时按需安装：
+
+```bash
+sudo apt install libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
+  xdg-utils libatspi2.0-0 libdrm2 libgbm1
+```
+
+> AppImage 用户通常无需手动安装，AppImage 会自带大部分依赖。
+
+### 从源码构建
+
+如果 Release 里没有你需要的包，可从源码自行构建：
+
+```bash
+git clone https://github.com/jade2-fff/Mineradio-for-linux.git
+cd Mineradio-for-linux
+npm install
+npm run build:linux        # 生成 AppImage + deb，产物在 dist/
+```
+
 ## 原版 Windows 下载
 
 ## 立即下载 Windows 安装包
