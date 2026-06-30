@@ -3,6 +3,8 @@ name: Build Linux (AppImage + deb)
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
     paths-ignore:
       - '**.md'
       - '.gitignore'
