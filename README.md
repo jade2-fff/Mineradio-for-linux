@@ -10,8 +10,8 @@ Mineradio 是一款 Windows 桌面沉浸式音乐播放器，把搜索播放、�
 
 | 安装方式 | 适用发行版 | 下载 |
 | --- | --- | --- |
-| AppImage（免安装，推荐） | 所有主流发行版 | [Mineradio-1.1.1-x86_64.AppImage](https://github.com/jade2-fff/Mineradio-for-linux/releases/download/v1.1.1/Mineradio-1.1.1-x86_64.AppImage) |
-| deb 包 | Debian / Ubuntu / 深度 | [Mineradio-1.1.1-amd64.deb](https://github.com/jade2-fff/Mineradio-for-linux/releases/download/v1.1.1/Mineradio-1.1.1-amd64.deb) |
+| AppImage（免安装，推荐） | 所有主流发行版 | [Mineradio-1.1.1-x86_64.AppImage](https://github.com/jade2-fff/Mineradio-for-linux/releases/latest/download/Mineradio-1.1.1-x86_64.AppImage) |
+| deb 包 | Debian / Ubuntu / 深度 | [Mineradio-1.1.1-amd64.deb](https://github.com/jade2-fff/Mineradio-for-linux/releases/latest/download/Mineradio-1.1.1-amd64.deb) |
 
 > [查看所有 Release](https://github.com/jade2-fff/Mineradio-for-linux/releases)
 
