@@ -5,6 +5,24 @@
 //  - 试听检测 (freeTrialInfo) + 全 quality 探测
 //  - 所有受保护 API 都会带上已登录用户的 cookie
 // ====================================================================
+// Linux/Electron 下 stdout/stderr 管道被外部命令提前关闭时, console.* 可能抛 EPIPE。
+// Server 是内嵌在主进程里的, 这里吞掉 EPIPE, 防止日志写入把整个 Electron 打崩。
+(function installSafeConsole() {
+  ['log', 'warn', 'error', 'info'].forEach((name) => {
+    const raw = console[name] && console[name].bind(console);
+    if (!raw) return;
+    console[name] = (...args) => {
+      try {
+        raw(...args);
+      } catch (e) {
+        if (!e || e.code !== 'EPIPE') throw e;
+      }
+    };
+  });
+  process.stdout && process.stdout.on && process.stdout.on('error', (e) => { if (!e || e.code !== 'EPIPE') throw e; });
+  process.stderr && process.stderr.on && process.stderr.on('error', (e) => { if (!e || e.code !== 'EPIPE') throw e; });
+})();
+
 const {
   search,
   cloudsearch,
@@ -53,6 +71,7 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
+const { createKugouProvider } = require('./kugou');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -130,6 +149,17 @@ function applySystemCertificateAuthorities() {
 }
 
 applySystemCertificateAuthorities();
+
+// ---------- 酷狗数据源（独立模块） ----------
+const kugou = createKugouProvider({
+  requestText,
+  UA,
+  normalizeQualityPreference,
+  playbackRestriction,
+  decodeQQLyricText,
+  decodeHtmlEntities,
+  cookieFile: process.env.KUGOU_COOKIE_FILE || path.join(__dirname, '.kugou-cookie'),
+});
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -2368,6 +2398,8 @@ function audioProxyHeadersFor(audioUrl, range) {
   try {
     const host = new URL(audioUrl).hostname.toLowerCase();
     if (host.includes('qq.com') || host.includes('qpic.cn')) headers.Referer = 'https://y.qq.com/';
+    else if (host.includes('kugou.com') || host.includes('kgmusic.com') || host.includes('tracker.kugou.com')) headers.Referer = 'https://www.kugou.com/';
+    else if (host.includes('kuwo.cn') || host.includes('kuwo.com')) headers.Referer = 'https://www.kuwo.cn/';
   } catch (e) {}
   if (range) headers.Range = range;
   return headers;
@@ -2909,6 +2941,7 @@ async function handleQQLyric(mid, id) {
     source: lyricText ? source : 'qq-empty',
   };
 }
+
 
 function mapPodcastRadio(r) {
   r = r || {};
@@ -3577,6 +3610,137 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[QQSongComments]', err);
       sendJSON(res, { provider: 'qq', error: err.message, comments: [] }, 500);
+    }
+    return;
+  }
+
+  // ---------- 酷狗音乐 ----------
+  if (pn === '/api/kugou/search') {
+    try {
+      const kw = url.searchParams.get('keywords') || '';
+      const limit = Math.max(4, Math.min(30, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
+      const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
+      const songs = await kugou.handleSearch(kw, limit, page);
+      sendJSON(res, { provider: 'kugou', songs });
+    } catch (err) {
+      console.error('[KugouSearch]', err);
+      sendJSON(res, { provider: 'kugou', error: err.message, songs: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/song/url') {
+    try {
+      const hash = url.searchParams.get('hash') || url.searchParams.get('mid') || url.searchParams.get('id') || '';
+      const albumId = url.searchParams.get('albumId') || url.searchParams.get('album_id') || url.searchParams.get('albumAudioId') || '';
+      const quality = url.searchParams.get('quality') || '';
+      const info = await kugou.handleSongUrl(hash, albumId, quality);
+      sendJSON(res, info);
+    } catch (err) {
+      console.error('[KugouSongUrl]', err);
+      sendJSON(res, { provider: 'kugou', url: '', playable: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/lyric') {
+    try {
+      const hash = url.searchParams.get('hash') || url.searchParams.get('mid') || url.searchParams.get('id') || '';
+      if (!hash) { sendJSON(res, { provider: 'kugou', error: 'Missing kugou song hash', lyric: '' }, 400); return; }
+      const data = await kugou.handleLyric(hash);
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouLyric]', err);
+      sendJSON(res, { provider: 'kugou', error: err.message, lyric: '' }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/login/status') {
+    try {
+      const info = await kugou.getLoginInfo();
+      sendJSON(res, info);
+    } catch (err) {
+      console.error('[KugouLoginStatus]', err);
+      sendJSON(res, { provider: 'kugou', loggedIn: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/login/cookie') {
+    try {
+      const body = await readRequestBody(req);
+      const raw = body.cookie || body.data || body.text || '';
+      const normalized = kugou.setCookie(raw);
+      if (!normalized) {
+        sendJSON(res, { provider: 'kugou', loggedIn: false, error: 'INVALID_KUGOU_COOKIE', message: '酷狗 cookie 为空' }, 400);
+        return;
+      }
+      const info = await kugou.getLoginInfo();
+      sendJSON(res, { ...info, saved: true });
+    } catch (err) {
+      console.error('[KugouLoginCookie]', err);
+      sendJSON(res, { provider: 'kugou', loggedIn: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/logout') {
+    kugou.clearCookie();
+    sendJSON(res, { provider: 'kugou', ok: true, loggedIn: false });
+    return;
+  }
+
+  if (pn === '/api/kugou/user/playlists') {
+    try {
+      const data = await kugou.handleUserPlaylists();
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouUserPlaylists]', err);
+      sendJSON(res, { provider: 'kugou', loggedIn: false, error: err.message, playlists: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/playlist/tracks') {
+    try {
+      const id = url.searchParams.get('id') || url.searchParams.get('specialid') || '';
+      const data = await kugou.handlePlaylistTracks(id);
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouPlaylistTracks]', err);
+      sendJSON(res, { provider: 'kugou', error: err.message, tracks: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/artist/detail') {
+    try {
+      const mid = url.searchParams.get('mid') || url.searchParams.get('singerid') || url.searchParams.get('id') || '';
+      const limit = Math.max(10, Math.min(80, parseInt(url.searchParams.get('limit') || '36', 10) || 36));
+      if (!mid) {
+        sendJSON(res, { provider: 'kugou', error: 'MISSING_SINGER_ID', artist: null, songs: [] }, 400);
+        return;
+      }
+      const data = await kugou.handleArtistDetail(mid, limit);
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouArtistDetail]', err);
+      sendJSON(res, { provider: 'kugou', error: err.message, artist: null, songs: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/song/comments') {
+    try {
+      const hash = url.searchParams.get('hash') || url.searchParams.get('mid') || url.searchParams.get('id') || '';
+      const limit = Math.max(6, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
+      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+      const data = await kugou.handleSongComments(hash, limit, offset);
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouSongComments]', err);
+      sendJSON(res, { provider: 'kugou', error: err.message, comments: [] }, 500);
     }
     return;
   }

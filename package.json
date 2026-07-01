@@ -29,6 +29,7 @@
       "public/**/*",
       "build/**/*",
       "server.js",
+      "kugou.js",
       "dj-analyzer.js",
       "package.json",
       "!public/index.*.html",

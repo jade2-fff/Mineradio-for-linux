@@ -136,6 +136,31 @@ function waitForServer(server) {
   });
 }
 
+function installLinuxMediaPermissionHandler() {
+  if (process.platform !== 'linux') return;
+  try {
+    const ses = session.defaultSession;
+    if (!ses || !ses.setPermissionRequestHandler) return;
+    ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      const origin = details && (details.requestingUrl || details.securityOrigin || details.embedder);
+      const isLocalMineradio = origin && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(origin);
+      if (permission === 'media' && isLocalMineradio) {
+        callback(true);
+        return;
+      }
+      callback(false);
+    });
+    if (ses.setPermissionCheckHandler) {
+      ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+        return permission === 'media' && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(requestingOrigin || '');
+      });
+    }
+    console.log('[LinuxMedia] local camera permission handler installed');
+  } catch (e) {
+    console.warn('[LinuxMedia] permission handler install failed:', e && e.message || e);
+  }
+}
+
 function sendWindowState(win) {
   if (!win || win.isDestroyed()) return;
   win.webContents.send('desktop-window-state', getWindowState(win));
@@ -1463,6 +1488,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    installLinuxMediaPermissionHandler();
     screen.on('display-metrics-changed', () => {
       positionDesktopLyricsWindow();
       positionWallpaperWindow();
