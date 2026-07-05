@@ -59,7 +59,7 @@
       // curl 进入 PINCH (五指聚拢度 > 0.62 连续 3 帧)
       pinchCurlOn: 0.62,
       // curl 松开 PINCH (< 0.42 连续 2 帧) — 迟滞防抖
-      pinchCurlOff: 0.42,
+      pinchCurlOff: 0.35,
       // curl 进入 FIST (> 0.85 且 openness<0.28 连续 4 帧) — 更紧才算握拳
       fistCurlOn: 0.85,
       fistCurlOff: 0.65,
@@ -69,9 +69,10 @@
 
     // -------- aimer 手势 → 命令映射 (control/aimer.js) --------
     aimer: Object.freeze({
-      // PINCH 状态下, X 方向挥动 -> 切歌
-      swipeXMin: 0.18,        // 单次挥动 X 位移阈值 (归一化坐标)
-      swipeCooldownMs: 700,    // 切歌冷却 (防连发)
+      // PINCH 状态下, 上/下方向快速挥动 -> 切歌
+      swipeYMin: 0.09,       // 单次上/下划位移阈值 (归一化坐标, 低于旧横划更灵敏)
+      swipeSpeedMin: 0.010,   // 切歌速度门槛, 太慢只当作普通移动
+      swipeCooldownMs: 620,    // 切歌冷却 (防连发)
       // PLAY_PAUSE 触发: PINCH → RELEASE 一次完整收拢→张开
       playPauseCooldownMs: 900,
       // SHELF_ROTATE: 张开手 + 横向移动

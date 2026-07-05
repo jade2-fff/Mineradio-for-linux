@@ -5,8 +5,8 @@
  * 决策器 (对应 Dart_Vision control::DartAimer).
  * 把状态机当前状态 + 手掌位移映射为 Command.
  *
- * v9.3 五指收拢驱动:
- *   PINCH (五指聚拢) + X 方向挥动 -> NEXT/PREV
+ * v9.4 五指收拢驱动:
+ *   PINCH (五指聚拢) + 上/下快速挥动 -> NEXT/PREV
  *   PINCH -> RELEASE 一次 (收拢-张开完整周期) -> PLAY_PAUSE
  *   FIST -> SHELF_FOCUS
  *   HOVER + 五指张开 + 横向移动 -> SHELF_ROTATE
@@ -22,8 +22,8 @@
 
   var ST = SM.ST || { IDLE: 0, HOVER: 1, PINCH: 2, FIST: 3, RELEASE: 4, OPEN_RELEASE: 5 };
 
-  // 横向挥动累积 (在 PINCH 期间)
-  var _lastPalmX = 0;
+  // 上/下挥动累积 (在 PINCH 期间)
+  var _lastPalmY = 0;
   var _pinchHasRef = false;
   // 冷却时间戳
   var _lastSwipeTs = 0;
@@ -35,7 +35,7 @@
   var _hoverRotateHasRef = false;
 
   function reset() {
-    _lastPalmX = 0;
+    _lastPalmY = 0;
     _pinchHasRef = false;
     _lastSwipeTs = 0;
     _lastPlayPauseTs = 0;
@@ -54,27 +54,32 @@
     var cmds = [];
     var st = SM.getState();
     var now = frame.timestamp;
+    var palmY = frame.palm.y;
     var palmX = frame.palm.x;
 
     // ---- 进入 PINCH 时记录起点 (用于切歌挥动判定) ----
     if (prevState !== ST.PINCH && st === ST.PINCH) {
-      _lastPalmX = palmX;
+      _lastPalmY = palmY;
       _pinchHasRef = true;
       _playPauseTempPinchFlag = true;
-      log.debug('Aimer', 'PINCH 入, 起点 x=' + palmX.toFixed(3));
+      log.debug('Aimer', 'PINCH 入, 起点 y=' + palmY.toFixed(3));
     }
 
-    // ---- PINCH 期间横向挥动 -> 切歌 ----
+    // ---- PINCH 期间上/下挥动 -> 切歌 ----
     if (st === ST.PINCH && _pinchHasRef) {
-      var dx = palmX - _lastPalmX;
-      var swipeMin = A.swipeXMin || 0.18;
-      var cooldown = A.swipeCooldownMs || 700;
-      if (Math.abs(dx) > swipeMin && (now - _lastSwipeTs) > cooldown) {
-        cmds.push({ type: dx > 0 ? Cmd.Type.NEXT_TRACK : Cmd.Type.PREV_TRACK, dx: dx, ts: now });
+      var dy = palmY - _lastPalmY;
+      var swipeMin = A.swipeYMin || 0.09;
+      var speedMin = A.swipeSpeedMin || 0.010;
+      var cooldown = A.swipeCooldownMs || 620;
+      // 关键: 只要出现明显竖向挥动意图(过半阈值)就取消 PLAY_PAUSE 判定,
+      // 避免挥手切歌途中手指自然松开被误当成 收拢→张开 的播放/暂停手势。
+      if (Math.abs(dy) > swipeMin * 0.5) _playPauseTempPinchFlag = false;
+      if (Math.abs(dy) > swipeMin && frame.speed >= speedMin && (now - _lastSwipeTs) > cooldown) {
+        cmds.push({ type: dy < 0 ? Cmd.Type.NEXT_TRACK : Cmd.Type.PREV_TRACK, dy: dy, speed: frame.speed, ts: now });
         _lastSwipeTs = now;
-        _playPauseTempPinchFlag = false;  // 切歌后本轮 PINCH 不再触发 PLAY_PAUSE
-        _lastPalmX = palmX;
-        log.info('Aimer', (dx > 0 ? 'NEXT' : 'PREV') + ' dx=' + dx.toFixed(3));
+        _playPauseTempPinchFlag = false;
+        _lastPalmY = palmY;
+        log.info('Aimer', (dy < 0 ? 'NEXT' : 'PREV') + ' dy=' + dy.toFixed(3) + ' v=' + frame.speed.toFixed(3));
       }
     }
 

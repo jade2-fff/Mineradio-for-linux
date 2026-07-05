@@ -73,7 +73,7 @@
         else if (_holdCount >= 4 && curl > fistCurlOn && openness < 0.28) transition(ST.FIST);
         break;
       case ST.PINCH:
-        if (_holdCount >= 2 && curl < pinchCurlOff) transition(ST.RELEASE);
+        if (_holdCount >= 3 && curl < pinchCurlOff) transition(ST.RELEASE);
         break;
       case ST.RELEASE:
         if (curl > pinchCurlOn) transition(ST.PINCH);
