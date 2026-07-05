@@ -1562,6 +1562,7 @@ function createKugouProvider(deps) {
         song: it.official_songname || it.songname || it.filename,
         singername: it.author_name,
         album_name: it.albumname || it.album_name,
+        album_img: it.sizable_cover || it.cover || (it.trans_param && it.trans_param.union_cover) || '',
         timelength: it.timelength || it.duration,
         pay_type: it.pay_type,
       })).filter(x => x.name && x.hash);
