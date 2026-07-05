@@ -3632,9 +3632,10 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/kugou/song/url') {
     try {
       const hash = url.searchParams.get('hash') || url.searchParams.get('mid') || url.searchParams.get('id') || '';
-      const albumId = url.searchParams.get('albumId') || url.searchParams.get('album_id') || url.searchParams.get('albumAudioId') || '';
+      const albumId = url.searchParams.get('albumId') || url.searchParams.get('album_id') || '';
+      const albumAudioId = url.searchParams.get('albumAudioId') || url.searchParams.get('album_audio_id') || url.searchParams.get('audioId') || '';
       const quality = url.searchParams.get('quality') || '';
-      const info = await kugou.handleSongUrl(hash, albumId, quality);
+      const info = await kugou.handleSongUrl(hash, albumId, quality, albumAudioId);
       sendJSON(res, info);
     } catch (err) {
       console.error('[KugouSongUrl]', err);
@@ -3663,6 +3664,29 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[KugouLoginStatus]', err);
       sendJSON(res, { provider: 'kugou', loggedIn: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/login/qr/create') {
+    try {
+      const data = await kugou.createQrLogin();
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouQrCreate]', err);
+      sendJSON(res, { provider: 'kugou', error: err.message, img: '', url: '' }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/kugou/login/qr/check') {
+    try {
+      const id = url.searchParams.get('id') || url.searchParams.get('key') || '';
+      const data = await kugou.checkQrLogin(id);
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouQrCheck]', err);
+      sendJSON(res, { provider: 'kugou', code: 500, error: err.message, message: err.message }, 500);
     }
     return;
   }
@@ -3734,9 +3758,10 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/kugou/song/comments') {
     try {
       const hash = url.searchParams.get('hash') || url.searchParams.get('mid') || url.searchParams.get('id') || '';
+      const albumAudioId = url.searchParams.get('albumAudioId') || url.searchParams.get('audioId') || '';
       const limit = Math.max(6, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
       const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
-      const data = await kugou.handleSongComments(hash, limit, offset);
+      const data = await kugou.handleSongComments(hash, limit, offset, albumAudioId);
       sendJSON(res, data);
     } catch (err) {
       console.error('[KugouSongComments]', err);

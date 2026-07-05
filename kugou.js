@@ -1346,37 +1346,62 @@ function createKugouProvider(deps) {
   function mapComment(raw) {
     raw = raw || {};
     const user = raw.user || {};
+    const like = raw.like && typeof raw.like === 'object' ? raw.like : {};
+    // 新 gateway 接口 addtime 是 'YYYY-MM-DD HH:mm:ss' 日期串；旧接口是秒级时间戳。
+    let timeMs = 0;
+    const at = raw.addtime != null ? raw.addtime : raw.create_time;
+    if (at != null && /\D/.test(String(at))) {
+      const parsed = Date.parse(String(at).replace(/-/g, '/'));
+      timeMs = Number.isFinite(parsed) ? parsed : 0;
+    } else {
+      timeMs = (Number(at || 0) || 0) * 1000;
+    }
     return {
-      id: raw.p_id || raw.comment_id || raw.id || '',
+      id: raw.id || raw.p_id || raw.comment_id || '',
       content: decodeHtmlEntities(raw.content || raw.message || ''),
-      likedCount: Number(raw.like || raw.likenum || raw.praise_count || 0) || 0,
-      time: (Number(raw.addtime || raw.create_time || 0) || 0) * 1000,
+      likedCount: Number(like.likenum || like.count || raw.likenum || (typeof raw.like === 'number' ? raw.like : 0) || raw.praise_count || 0) || 0,
+      time: timeMs,
       user: {
-        id: String(user.id || raw.userid || ''),
-        nickname: decodeHtmlEntities(user.name || user.nickname || raw.username || '酷狗用户'),
-        avatar: user.headimg || user.avatar || raw.headimg || '',
+        id: String(raw.user_id || user.id || raw.userid || ''),
+        nickname: decodeHtmlEntities(raw.user_name || user.name || user.nickname || raw.username || '酷狗用户'),
+        avatar: raw.user_pic || user.headimg || user.avatar || raw.headimg || '',
       },
     };
   }
 
-  async function handleSongComments(hash, limit, offset) {
+  // 歌曲评论：官方 Android gateway 接口。mixsongid=album_audio_id、extdata=hash，结果在根级 list。
+  // 旧 comment.service.kugou.com 接口已失效（无效 uri + 证书不匹配）。
+  async function handleSongComments(hash, limit, offset, albumAudioId) {
     const songHash = String(hash || '').trim();
-    if (!songHash) return { provider: 'kugou', error: 'Missing kugou song hash', comments: [] };
+    const audioId = String(albumAudioId || '').trim();
+    if (!songHash && !audioId) return { provider: 'kugou', error: 'Missing kugou song id', comments: [] };
     const num = Math.max(6, Math.min(50, parseInt(limit || '20', 10) || 20));
     const page = Math.max(1, Math.floor((offset || 0) / num) + 1);
     try {
-      const json = await kugouRequest('https://comment.service.kugou.com/v1/pc/rank/get', {
-        appid: '1005',
-        code: 'fc4be23b4e972707f44b856e6090a6ed',
-        clientver: '1116',
-        p: String(page),
-        ps: String(num),
-        extdata: songHash,
-        is_hot: '1',
-      }, { signed: false });
-      const list = json && json.data && Array.isArray(json.data.list) ? json.data.list : [];
+      try { await ensurePlaybackDevice(); } catch (e) {}
+      const clienttime = Math.floor(Date.now() / 1000);
+      const params = {
+        dfid: deviceDfid || kugouDfid || '-', mid: deviceMid || kugouMid || '-',
+        uuid: '-', appid: 1005, clientver: 20489, clienttime,
+        token: loginToken() || undefined, userid: userId() || undefined,
+        mixsongid: Number(audioId) || 0, need_show_image: 1, p: page, pagesize: num,
+        show_classify: 1, show_hotword_list: 1, extdata: songHash,
+        code: 'fc4be23b4e972707f36b8a828a93ba8a',
+      };
+      Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+      params.signature = signAndroidExact(params, '');
+      const u = new URL('https://gateway.kugou.com/mcomment/v1/cmtlist');
+      Object.keys(params).forEach(k => u.searchParams.set(k, String(params[k])));
+      const headers = {
+        'User-Agent': KUGOU_ANDROID_UA, dfid: params.dfid, clienttime, mid: params.mid,
+        'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': '1', 'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+      };
+      if (kugouCookie) headers.Cookie = kugouCookie;
+      const text = await requestText(u.toString(), { method: 'POST', headers }, '');
+      const json = JSON.parse(text);
+      const list = Array.isArray(json.list) ? json.list : (json.data && Array.isArray(json.data.list) ? json.data.list : []);
       const comments = list.map(mapComment).filter(c => c.content);
-      return { provider: 'kugou', total: (json && json.data && json.data.count) || comments.length, comments };
+      return { provider: 'kugou', total: json.count || (json.data && json.data.count) || comments.length, comments };
     } catch (e) {
       return { provider: 'kugou', error: e.message, comments: [] };
     }

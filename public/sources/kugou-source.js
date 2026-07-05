@@ -39,6 +39,7 @@
     song = song || {};
     return '/api/kugou/song/url?hash=' + enc(songId(song)) +
       '&albumId=' + enc(song.albumId || song.album_id || '') +
+      '&albumAudioId=' + enc(song.albumAudioId || song.album_audio_id || song.audioId || song.audio_id || '') +
       (qualityParam || '');
   }
 
@@ -47,7 +48,11 @@
   }
 
   function commentsUrl(song, limit) {
-    return '/api/kugou/song/comments?hash=' + enc(songId(song)) + '&limit=' + enc(limit || 18);
+    song = song || {};
+    var audioId = song.albumAudioId || song.album_audio_id || song.audioId || song.audio_id || '';
+    return '/api/kugou/song/comments?hash=' + enc(songId(song)) +
+      '&albumAudioId=' + enc(audioId) +
+      '&limit=' + enc(limit || 18);
   }
 
   function artistId(song) {
