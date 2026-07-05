@@ -2,6 +2,9 @@ const assert = require('assert');
 const path = require('path');
 const { createKugouProvider } = require('./kugou');
 
+// 让 /v5/url 设备注册在测试中失败，使 v5 取址返回 null 走后续回退链路。默认会走真实网络，测试不可控。
+const failingBinary = async () => ({ statusCode: 200, buffer: Buffer.from(String.fromCharCode(123,125)), headers: {} });
+
 function makeProvider(requests) {
   return createKugouProvider({
     requestText: async (url) => {
@@ -48,6 +51,7 @@ function makeProvider(requests) {
     playbackRestriction: () => ({}),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile: path.join(__dirname, '.tmp-kugou-search-test-cookie'),
   });
 }
@@ -88,6 +92,7 @@ async function testPaidSongUrlIsUnavailableNotHttpFailure() {
     playbackRestriction: (provider, category, message, action, extra) => ({ provider, category, message, action, extra }),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile: path.join(__dirname, '.tmp-kugou-search-test-cookie'),
   });
   const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'hires');
@@ -121,6 +126,7 @@ async function testPaidSongUrlCarriesVipLoginStateAndToken() {
     playbackRestriction: (provider, category, message, action, extra) => ({ provider, category, message, action, extra }),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile,
   });
   const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'hires');
@@ -150,6 +156,7 @@ async function testLoginInfoRefreshesVipTokenFromAndroidSession() {
     playbackRestriction: (provider, category, message, action, extra) => ({ provider, category, message, action, extra }),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile,
   });
   const info = await kugou.getLoginInfo();
@@ -176,6 +183,7 @@ async function testVipPaidSongReportsClientUnsupportedNotAccountFault() {
     playbackRestriction: (provider, category, message, action, extra) => ({ provider, category, message, action, extra }),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile,
   });
   const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'hires');
@@ -203,6 +211,7 @@ async function testSongUrlUsesM3wsAndAlbumAudioId() {
     playbackRestriction: () => ({}),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile: path.join(__dirname, '.tmp-kugou-m3ws-test-cookie'),
   });
   const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'hires', '123');
@@ -229,12 +238,46 @@ async function testBadKeyIsReportedAsAuthorizationNotCopyright() {
     playbackRestriction: (provider, category, message, action, extra) => ({ provider, category, message, action, extra }),
     decodeQQLyricText: value => value,
     decodeHtmlEntities: value => value,
+    requestBinary: failingBinary,
     cookieFile: path.join(__dirname, '.tmp-kugou-badkey-test-cookie'),
   });
   const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'hires', '123');
   assert.strictEqual(result.playable, false);
   assert.strictEqual(result.reason, 'signature_or_authorization_unavailable');
   assert.ok(/授权|接口/.test(result.message || ''));
+}
+
+// v5/url 首选取址成功：注册设备(拿到dfid)后，VIP账号应直接返回完整播放地址。
+async function testV5PlayUrlSucceedsForVipWithDevice() {
+  const cookieFile = path.join(__dirname, '.tmp-kugou-v5-success-cookie');
+  require('fs').writeFileSync(cookieFile, 'userid=42; token=login-token; vip_token=vip-token; vip_type=6; dfid=-; mid=mid-1');
+  const deviceFile = cookieFile + '.device';
+  require('fs').writeFileSync(deviceFile, JSON.stringify({ guid: 'g-1', mid: '9999', dfid: 'dev-dfid-1' }));
+  let v5Called = false;
+  const kugou = createKugouProvider({
+    requestText: async (url) => {
+      if (url.includes('m.kugou.com/app/i/getSongInfo.php')) return JSON.stringify({ status: 1, extra: { '320hash': 'HASH320' } });
+      throw new Error('Unexpected text request: ' + url);
+    },
+    requestBinary: async (url) => {
+      v5Called = true;
+      if (url.includes('gateway.kugou.com/v5/url')) {
+        return { statusCode: 200, buffer: Buffer.from(JSON.stringify({ status: 1, url: ['https://play.example/full.mp3'], bitRate: 320, extName: 'mp3' })), headers: {} };
+      }
+      throw new Error('Unexpected binary request: ' + url);
+    },
+    UA: 'MineradioTest/1.0',
+    normalizeQualityPreference: value => value || 'exhigh',
+    playbackRestriction: () => ({}),
+    decodeQQLyricText: value => value,
+    decodeHtmlEntities: value => value,
+    cookieFile,
+  });
+  const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'exhigh', '123');
+  assert.strictEqual(result.playable, true);
+  assert.strictEqual(result.url, 'https://play.example/full.mp3');
+  assert.ok(v5Called, 'should use v5 url endpoint');
+  require('fs').unlinkSync(deviceFile);
 }
 
 testSearchFallsBackWhenComplexSearchSignatureFails()
@@ -244,6 +287,7 @@ testSearchFallsBackWhenComplexSearchSignatureFails()
   .then(testVipPaidSongReportsClientUnsupportedNotAccountFault)
   .then(testSongUrlUsesM3wsAndAlbumAudioId)
   .then(testBadKeyIsReportedAsAuthorizationNotCopyright)
+  .then(testV5PlayUrlSucceedsForVipWithDevice)
   .then(() => console.log('ok'))
   .catch((err) => {
     console.error(err);

@@ -211,6 +211,56 @@ function rsaPkcs1EncryptJson(data) {
   return crypto.publicEncrypt({ key: KUGOU_RSA_PUBLIC_KEY, padding: crypto.constants.RSA_PKCS1_PADDING }, Buffer.from(JSON.stringify(data || {}), 'utf8')).toString('hex');
 }
 
+// ---------- 官方 Android 客户端取址所需（VIP 播放） ----------
+const KUGOU_ANDROID_UA = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
+// 设备 GUID：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx，与官方客户端一致。
+function generateGuid() {
+  const seg = () => ((65536 * (1 + Math.random())) | 0).toString(16).substring(1);
+  return `${seg()}${seg()}-${seg()}-${seg()}-${seg()}-${seg()}${seg()}${seg()}`;
+}
+// mid 必须由 guid 派生：BigInt(md5(guid) 作为16进制) 的十进制串。随机 mid 会导致取址静默返回空。
+function calculateMidFromGuid(guid) {
+  return BigInt('0x' + md5Hex(guid)).toString();
+}
+// /v5/url 需要的 key 参数：md5(hash + salt + appid + mid + userid)。
+function signPlayKey(hash, mid, userid, appid) {
+  return md5Hex(`${hash}57ae12eb6890223e355ccfcb74edf70d${appid || 1005}${mid}${userid || 0}`);
+}
+// 精确 Android 签名：不过滤空值（module='' 等空串必须参与），否则签名与服务端不一致。
+function signAndroidExact(params, data) {
+  const salt = 'OIlwieks28dk2k092lksi2UIkp';
+  const joined = Object.keys(params || {})
+    .filter(k => k !== 'signature')
+    .sort()
+    .map(k => `${k}=${typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]}`)
+    .join('');
+  return md5Hex(salt + joined + (data || '') + salt);
+}
+// register_dev 响应为 AES-128-CBC 加密的二进制，用请求时的随机 key 解密。
+function playlistAesDecrypt(strBase64, tempKey) {
+  const hash = md5Hex(tempKey);
+  const decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(hash.substring(0, 16), 'utf8'), Buffer.from(hash.substring(16, 32), 'utf8'));
+  const out = Buffer.concat([decipher.update(Buffer.from(String(strBase64 || ''), 'base64')), decipher.final()]).toString('utf8');
+  try { return JSON.parse(out); } catch (e) { return out; }
+}
+// 返回原始 Buffer 的请求（register_dev 二进制响应不能按 utf8 解码）。
+function requestBuffer(targetUrl, opts, body) {
+  opts = opts || {};
+  return new Promise((resolve, reject) => {
+    const u = new URL(targetUrl);
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request(u, { method: opts.method || 'GET', headers: opts.headers || {} }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({ statusCode: response.statusCode, buffer: Buffer.concat(chunks), headers: response.headers || {} }));
+    });
+    req.setTimeout(12000, () => req.destroy(new Error('Request timeout')));
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 // ====================================================================
 //  createKugouProvider(deps)
 //    deps = {
@@ -225,6 +275,8 @@ function rsaPkcs1EncryptJson(data) {
 // ====================================================================
 function createKugouProvider(deps) {
   const requestText = deps.requestText;
+  // register_dev 返回 AES 加密二进制，取址链需要原始 Buffer；可注入以便测试，默认走真实网络。
+  const requestBinary = deps.requestBinary || requestBuffer;
   const UA = deps.UA;
   const normalizeQualityPreference = deps.normalizeQualityPreference;
   const playbackRestriction = deps.playbackRestriction;
@@ -256,6 +308,30 @@ function createKugouProvider(deps) {
   function persistCookie(text) {
     kugouCookie = text || '';
     try { fs.writeFileSync(COOKIE_FILE, kugouCookie); } catch (e) {}
+  }
+
+  // ---------- 播放设备身份（guid → mid → dfid），独立于登录 cookie 持久化 ----------
+  // 官方 Android 取址接口要求成套的有效设备指纹：mid 由 guid 派生，dfid 由 register_dev 返回。
+  // 登录 cookie 里的 dfid 常为占位符 '-'，不能用于取址，故设备身份单独注册并复用。
+  const DEVICE_FILE = COOKIE_FILE + '.device';
+  let deviceGuid = '';
+  let deviceMid = '';
+  let deviceDfid = '';
+  try {
+    if (fs.existsSync(DEVICE_FILE)) {
+      const dev = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8') || '{}');
+      deviceGuid = dev.guid || '';
+      deviceMid = dev.mid || '';
+      deviceDfid = dev.dfid || '';
+    }
+  } catch (e) {}
+
+  function persistDevice() {
+    try { fs.writeFileSync(DEVICE_FILE, JSON.stringify({ guid: deviceGuid, mid: deviceMid, dfid: deviceDfid })); } catch (e) {}
+  }
+
+  function hasPlaybackDevice() {
+    return !!(deviceGuid && deviceMid && deviceDfid && deviceDfid !== '-');
   }
 
   function userId() {
@@ -495,6 +571,128 @@ function createKugouProvider(deps) {
       syncFingerprint(merged);
     }
     return true;
+  }
+
+  // 注册播放设备身份：新建 guid → mid=calculateMid(guid) → register_dev 拿 dfid，成功后持久化复用。
+  let deviceRegisterInFlight = null;
+  async function ensurePlaybackDevice() {
+    if (hasPlaybackDevice()) return true;
+    if (deviceRegisterInFlight) return deviceRegisterInFlight;
+    deviceRegisterInFlight = (async () => {
+      const guid = generateGuid();
+      const mid = calculateMidFromGuid(guid);
+      const clienttime = Math.floor(Date.now() / 1000);
+      const dataMap = {
+        availableRamSize: 4983533568, availableRomSize: 48114719, availableSDSize: 48114717,
+        basebandVer: '', batteryLevel: 100, batteryStatus: 3, brand: 'Redmi', buildSerial: 'unknown',
+        device: 'marble', imei: guid, imsi: '', manufacturer: 'Xiaomi', uuid: guid,
+        accelerometer: false, accelerometerValue: '', gravity: false, gravityValue: '',
+        gyroscope: false, gyroscopeValue: '', light: false, lightValue: '', magnetic: false,
+        magneticValue: '', orientation: false, orientationValue: '', pressure: false, pressureValue: '',
+        step_counter: false, step_counterValue: '', temperature: false, temperatureValue: '',
+      };
+      const box = playlistAesEncrypt(dataMap);
+      const p = rsaPkcs1EncryptJson({ aes: box.key, uid: userId() || 0, token: loginToken() || '' });
+      const body = box.str;
+      const params = {
+        dfid: '-', mid, uuid: '-', appid: 1005, clientver: 20489, clienttime,
+        token: loginToken() || undefined, userid: userId() || undefined,
+        part: 1, platid: 1, p,
+      };
+      Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+      params.signature = signAndroidExact(params, body);
+      const u = new URL('https://userservice.kugou.com/risk/v2/r_register_dev');
+      Object.keys(params).forEach(k => u.searchParams.set(k, String(params[k])));
+      const headers = {
+        'User-Agent': KUGOU_ANDROID_UA, dfid: '-', clienttime, mid,
+        'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': '1', 'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+        'Content-Type': 'application/json',
+      };
+      if (kugouCookie) headers.Cookie = kugouCookie;
+      const resp = await requestBinary(u.toString(), { method: 'POST', headers }, body);
+      const decoded = playlistAesDecrypt(resp.buffer.toString('base64'), box.key);
+      const dfid = decoded && decoded.data && !Array.isArray(decoded.data) && decoded.data.dfid;
+      if (dfid) {
+        deviceGuid = guid; deviceMid = mid; deviceDfid = dfid;
+        persistDevice();
+        return true;
+      }
+      return false;
+    })();
+    try {
+      return await deviceRegisterInFlight;
+    } catch (e) {
+      console.warn('[KugouDevice] register failed:', e.message);
+      return false;
+    } finally {
+      deviceRegisterInFlight = null;
+    }
+  }
+
+  // 按请求音质解析对应的音质 hash（酷狗每档音质是不同 hash，128hash 只出 128kbps）。
+  // 需先注册设备后再查，避免设备不可用时多打一次 mobile 接口。返回 { hash, quality }。
+  async function resolvePlaybackHash(songHash, albumId, requestedQuality) {
+    if (!requestedQuality || requestedQuality === 'standard') return { hash: songHash, quality: '128' };
+    try {
+      const info = await fetchMobileSongInfo(songHash, albumId);
+      const ex = (info && info.extra) || {};
+      if (requestedQuality === 'hires' || requestedQuality === 'jymaster') {
+        if (ex.highhash) return { hash: ex.highhash, quality: 'high' };
+        if (ex.sqhash) return { hash: ex.sqhash, quality: 'flac' };
+        if (ex['320hash']) return { hash: ex['320hash'], quality: '320' };
+      } else if (requestedQuality === 'lossless') {
+        if (ex.sqhash) return { hash: ex.sqhash, quality: 'flac' };
+        if (ex['320hash']) return { hash: ex['320hash'], quality: '320' };
+      } else if (requestedQuality === 'exhigh') {
+        if (ex['320hash']) return { hash: ex['320hash'], quality: '320' };
+      }
+    } catch (e) {}
+    return { hash: songHash, quality: '128' };
+  }
+
+  // 官方 Android /v5/url 取址：VIP 账号可取完整播放地址。响应地址在根级 url/backupUrl。
+  // requestedQuality 传入后会先注册设备、再据此解析高音质 hash，避免设备不可用时多打接口。
+  async function fetchV5PlayUrl(hash, albumId, albumAudioId, requestedQuality) {
+    if (!hasPlaybackDevice()) {
+      const ok = await ensurePlaybackDevice();
+      if (!ok) return null;
+    }
+    const resolved = await resolvePlaybackHash(hash, albumId, requestedQuality);
+    const playHash = resolved.hash;
+    const q = resolved.quality;
+    const clienttime = Math.floor(Date.now() / 1000);
+    const params = {
+      dfid: deviceDfid, mid: deviceMid, uuid: '-', appid: 1005, clienttime,
+      token: loginToken() || undefined, userid: userId() || undefined,
+      album_id: Number(albumId || 0), area_code: 1, hash: String(playHash || '').toLowerCase(),
+      ssa_flag: 'is_fromtrack', version: 11430, page_id: 151369488, quality: q,
+      album_audio_id: Number(albumAudioId || 0), behavior: 'play', pid: 2, cmd: 26,
+      pidversion: 3001, IsFreePart: 0, ppage_id: '463467626,350369493,788954147',
+      cdnBackup: 1, module: '', clientver: 11430,
+    };
+    Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+    params.key = signPlayKey(params.hash, params.mid, params.userid, params.appid);
+    params.signature = signAndroidExact(params, '');
+    const u = new URL('https://gateway.kugou.com/v5/url');
+    Object.keys(params).forEach(k => u.searchParams.set(k, String(params[k])));
+    const headers = {
+      'User-Agent': KUGOU_ANDROID_UA, dfid: deviceDfid, clienttime, mid: deviceMid,
+      'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': '1', 'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+      'x-router': 'trackercdn.kugou.com',
+    };
+    if (kugouCookie) headers.Cookie = kugouCookie;
+    const resp = await requestBinary(u.toString(), { method: 'GET', headers });
+    let json;
+    try { json = JSON.parse(resp.buffer.toString('utf8')); } catch (e) { return null; }
+    const urls = (Array.isArray(json.url) && json.url) || (Array.isArray(json.backupUrl) && json.backupUrl) || [];
+    const playUrl = urls.find(Boolean);
+    if (!playUrl) return null;
+    return {
+      url: playUrl,
+      level: json.extName || '',
+      quality: json.bitRate ? String(json.bitRate) : String(q),
+      volume: json.volume,
+    };
   }
 
   async function kugouRequest(apiUrl, params, opts) {
@@ -866,8 +1064,28 @@ function createKugouProvider(deps) {
     const vip = vipToken();
     const permissionState = kugouPlaybackPermissionState(loginInfo, vip);
 
-    // 优先走 m3ws 官方移动接口。它使用 Web signature，实测能返回 VIP5 账号可播地址；
-    // 旧 play/index key 算法在当前接口上返回 Bad key，不能再作为首选。
+    // 首选：官方 Android /v5/url 取址。用注册的设备身份链（guid/mid/dfid），VIP 账号可取完整地址。
+    // 音质 hash 解析、设备注册都在 fetchV5PlayUrl 内完成；设备不可用时返回 null 走后续回退。
+    try {
+      const v5 = await fetchV5PlayUrl(songHash, album, audioId, requestedQuality);
+      if (v5 && v5.url) {
+        return {
+          provider: 'kugou',
+          url: v5.url,
+          trial: false,
+          playable: true,
+          level: v5.level,
+          quality: v5.quality,
+          hash: songHash,
+          ...permissionState,
+          requestedQuality,
+        };
+      }
+    } catch (e) {
+      console.warn('[KugouSongUrl] v5 url failed:', e.message);
+    }
+
+    // 回退：m3ws 官方移动接口。它使用 Web signature，实测能返回 VIP5 账号可播地址。
     const m3wsErrorMessages = [];
     try {
       const m3 = await fetchM3wsSongInfo(songHash, album, audioId);
