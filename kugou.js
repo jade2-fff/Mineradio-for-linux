@@ -1528,6 +1528,50 @@ function createKugouProvider(deps) {
     }
   }
 
+  // ---------- 业务: 每日推荐 ----------
+  // 官方 Android 个性化每日推荐(需登录+设备身份)。实测返回 data.song_list 30 首。
+  async function handleDailyRecommend() {
+    const info = await getLoginInfo();
+    if (!info.loggedIn || !info.userId) return { provider: 'kugou', loggedIn: false, songs: [] };
+    try {
+      if (!hasPlaybackDevice()) { try { await ensurePlaybackDevice(); } catch (e) {} }
+      const clienttime = Math.floor(Date.now() / 1000);
+      const params = {
+        dfid: deviceDfid || kugouDfid || '-', mid: deviceMid || kugouMid || '-',
+        uuid: '-', appid: 1005, clientver: 20489, clienttime,
+        token: loginToken() || undefined, userid: userId() || undefined,
+        platform: 'android',
+      };
+      Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+      params.signature = signAndroidExact(params, '');
+      const u = new URL('https://gateway.kugou.com/everyday_song_recommend');
+      Object.keys(params).forEach(k => u.searchParams.set(k, String(params[k])));
+      const headers = {
+        'User-Agent': KUGOU_ANDROID_UA, dfid: params.dfid, clienttime, mid: params.mid,
+        'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': '1', 'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+        'x-router': 'everydayrec.service.kugou.com',
+      };
+      if (kugouCookie) headers.Cookie = kugouCookie;
+      const text = await requestText(u.toString(), { method: 'POST', headers }, '');
+      const json = JSON.parse(text);
+      const rawSongs = json && json.data && Array.isArray(json.data.song_list) ? json.data.song_list : [];
+      const songs = rawSongs.map(it => mapSong({
+        hash: it.hash,
+        album_audio_id: it.album_audio_id || it.audio_id || it.scid,
+        album_id: it.album_id,
+        song: it.official_songname || it.songname || it.filename,
+        singername: it.author_name,
+        album_name: it.albumname || it.album_name,
+        timelength: it.timelength || it.duration,
+        pay_type: it.pay_type,
+      })).filter(x => x.name && x.hash);
+      const cover = (json.data && (json.data.cover_img_url || json.data.cover)) || '';
+      return { provider: 'kugou', loggedIn: true, title: (json.data && json.data.sub_title) || '每日推荐', cover, songs };
+    } catch (e) {
+      return { provider: 'kugou', loggedIn: true, error: e.message, songs: [] };
+    }
+  }
+
   function normalizeKugouVip(cookieObj, user, data) {
     cookieObj = cookieObj || {};
     user = user || {};
@@ -1716,6 +1760,7 @@ function createKugouProvider(deps) {
     handleArtistDetail,
     handlePlaylistTracks,
     handleUserPlaylists,
+    handleDailyRecommend,
     getLoginInfo,
     createQrLogin,
     checkQrLogin,

@@ -79,6 +79,7 @@
   function loginCookieUrl() { return '/api/kugou/login/cookie'; }
   function logoutUrl() { return '/api/kugou/logout'; }
   function userPlaylistsUrl() { return '/api/kugou/user/playlists'; }
+  function dailyUrl() { return '/api/kugou/daily'; }
 
   window.MineradioKugouSource = {
     key: 'kugou',
@@ -101,6 +102,7 @@
     loginStatusUrl: loginStatusUrl,
     loginCookieUrl: loginCookieUrl,
     logoutUrl: logoutUrl,
-    userPlaylistsUrl: userPlaylistsUrl
+    userPlaylistsUrl: userPlaylistsUrl,
+    dailyUrl: dailyUrl
   };
 })();

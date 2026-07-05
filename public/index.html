@@ -6,6 +6,52 @@
 <title>Mineradio</title>
 <meta name="referrer" content="no-referrer">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Inter:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700;900&family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
+<script>
+// 全局启动错误捕获：任何未捕获异常/Promise 拒绝都可视化到屏幕，避免初始化失败时静默冻死在开屏。
+(function () {
+  var shown = 0;
+  function paint(kind, msg, extra) {
+    if (shown > 6) return; shown++;
+    try {
+      var box = document.getElementById('mineradio-boot-error');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'mineradio-boot-error';
+        box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;max-height:46vh;overflow:auto;'
+          + 'background:rgba(20,0,0,.94);color:#ffd7d7;font:12px/1.5 monospace;padding:12px 16px;'
+          + 'border-top:2px solid #ff5367;white-space:pre-wrap;pointer-events:auto;box-shadow:0 -8px 40px rgba(0,0,0,.6)';
+        (document.body || document.documentElement).appendChild(box);
+        var tip = document.createElement('div');
+        tip.style.cssText = 'color:#ffb3b3;font-weight:700;margin-bottom:6px';
+        tip.textContent = '⚠ Mineradio 启动错误（已捕获，避免静默卡死）：';
+        box.appendChild(tip);
+      }
+      var line = document.createElement('div');
+      line.style.cssText = 'margin:4px 0;border-top:1px solid rgba(255,120,120,.2);padding-top:4px';
+      line.textContent = '[' + kind + '] ' + msg + (extra ? ('\n    ' + extra) : '');
+      box.appendChild(line);
+    } catch (e) {}
+  }
+  window.addEventListener('error', function (ev) {
+    // 只上报真正的 JS 异常；资源加载失败(img/audio/link 等)只在控制台留痕，不弹窗打扰。
+    if (!ev || !ev.message) {
+      var tgt = ev && ev.target;
+      if (tgt && tgt !== window && (tgt.tagName || tgt.nodeType)) {
+        console.warn('[Mineradio] 资源加载失败(非致命):', tgt.src || tgt.href || tgt.currentSrc || tgt.tagName);
+        return;
+      }
+    }
+    var m = ev && ev.message ? ev.message : String(ev);
+    var loc = ev && ev.filename ? (ev.filename.split('/').pop() + ':' + ev.lineno + ':' + ev.colno) : '';
+    var stack = ev && ev.error && ev.error.stack ? ev.error.stack : '';
+    paint('error', m + (loc ? ('  @ ' + loc) : ''), stack);
+  }, true);
+  window.addEventListener('unhandledrejection', function (ev) {
+    var r = ev && ev.reason;
+    paint('promise', (r && r.message) ? r.message : String(r), r && r.stack ? r.stack : '');
+  });
+})();
+</script>
 <script src="vendor/three.r128.min.js"></script>
 <script src="vendor/music-tempo.min.js"></script>
 <script src="vendor/gsap.min.js"></script>
@@ -1936,7 +1982,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
       <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
     </button>
     <button id="clear-cover-btn" class="icon-btn" onclick="clearCustomCoverForCurrent()" title="取消自定义封面" aria-label="取消自定义封面">×</button>
-    <div id="upload-tip" role="status" aria-live="polite">
+    <div id="upload-tip">
       <button class="upload-tip-close" onclick="closeUploadTip(true)" aria-label="关闭提示">×</button>
       <span class="upload-tip-title">导入入口</span>
       这里支持上传歌曲，也可以给当前曲目换自定义封面。
@@ -1961,7 +2007,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
         <div class="home-card-sub" id="home-weather-card-sub">打开左侧歌单库</div>
         <div class="home-card-art" id="home-weather-art"></div>
       </button>
-      <button class="home-card" data-home-tone="mix" type="button" onclick="playHomeSong(0)">
+      <button class="home-card" data-home-tone="mix" type="button" onclick="playHomeDaily()">
         <div class="home-card-label">Daily</div>
         <div class="home-card-title" id="home-daily-title">每日推荐</div>
         <div class="home-card-sub" id="home-daily-sub">登录后同步你的今日歌曲</div>
@@ -1979,10 +2025,10 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
         <div class="home-card-sub" id="home-continue-sub">最近播放会出现在这里</div>
         <div class="home-card-art" id="home-continue-art"></div>
       </button>
-      <button class="home-card" data-home-tone="local" type="button" onclick="openHomeInsight()">
-        <div class="home-card-label">Profile</div>
-        <div class="home-card-title" id="home-profile-title">听歌画像</div>
-        <div class="home-card-sub" id="home-profile-sub">播放几首后生成偏好</div>
+      <button class="home-card" data-home-tone="local" type="button" onclick="playHomeSong(2)">
+        <div class="home-card-label">Song</div>
+        <div class="home-card-title" id="home-profile-title">继续推荐</div>
+        <div class="home-card-sub" id="home-profile-sub">从当前平台继续播放</div>
         <div class="home-card-art" id="home-profile-art"></div>
       </button>
       <button class="home-card" data-home-tone="local" type="button" onclick="playHomeSong(2)">
@@ -2304,7 +2350,8 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
   </div>
   <div id="pl-pane" style="display:none">
     <div class="queue-toolbar">
-      <div class="queue-chip">登录后显示网易云 / QQ 歌单</div>
+      <div id="playlist-login-chip" class="queue-chip">登录后显示网易云 / QQ / 酷狗歌单</div>
+      <button id="playlist-relogin-btn" class="fx-mini-btn ghost" onclick="openPlaylistRelogin()" style="display:none;height:26px;padding:0 10px;font-size:11px">重新登录</button>
       <button class="fx-mini-btn ghost" onclick="refreshUserPlaylists(true)" style="height:26px;padding:0 10px;font-size:11px">刷新</button>
     </div>
     <div id="pl-list" style="margin-top:6px"></div>
@@ -2340,7 +2387,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
   <div>手势：<b id="gesture-label">待命</b></div>
   <div id="gesture-confirm" class="gesture-confirm">将手放进摄像头视野</div>
   <div class="gesture-meter"><span id="gesture-fill"></span></div>
-  <div class="gesture-legend">五指收拢切歌 · 握拳聚焦 · 张开旋转歌单架</div>
+  <div class="gesture-legend">五指收拢后上/下划切歌 · 握拳聚焦 · 张开旋转歌单架</div>
 </div>
 
 <!-- 左下小封面 -->
@@ -2661,7 +2708,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 </div>
 
 <div id="toast"></div>
-<div id="source-fallback-notice" aria-live="polite">
+<div id="source-fallback-notice">
   <div class="source-fallback-head">
     <div id="source-fallback-title" class="source-fallback-title">自动换源</div>
     <button class="source-fallback-close" type="button" onclick="closeSourceFallbackNotice()">×</button>
@@ -2669,7 +2716,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
   <div id="source-fallback-body" class="source-fallback-body"></div>
 </div>
 
-<div id="visual-guide" aria-live="polite" aria-hidden="true">
+<div id="visual-guide" aria-hidden="true">
   <div class="visual-guide-scrim"></div>
   <div id="visual-guide-ring" class="visual-guide-ring"></div>
   <div id="visual-guide-card" class="visual-guide-card">
@@ -2728,7 +2775,7 @@ var qqWebLoginBusy = false;
 var kugouWebLoginBusy = false;
 var qqManualCookieOpen = false;
 var loginStatusChecked = false, loginStatusCheckFailed = false;
-var qrPollTimer = null, qrKey = null;
+var qrPollTimer = null, qrKey = null, qrProvider = 'netease';
 var volumeTween = null, trackSwitchToken = 0;
 var audioFadeTimer = null, audioElementFadeFrame = 0, audioFadeSerial = 0;
 var AUDIO_FADE_IN_MS = 460;
@@ -3794,7 +3841,25 @@ function getRenderLoadTier() {
   if (cssPixels >= 3200000 || renderPixels >= 3600000) return 1;
   return 0;
 }
-var renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
+// 主 WebGL 渲染器创建：包 try/catch + 降级参数，避免在某些 GPU/驱动上创建失败时
+// 抛异常中断整段内联脚本（会导致开屏点击/定时器永不绑定、页面静默冻死）。
+function createMainRenderer() {
+  var attempts = [
+    { antialias: false, alpha: true, powerPreference: 'high-performance' },
+    { antialias: false, alpha: true, powerPreference: 'default' },
+    { antialias: false, alpha: false, powerPreference: 'default', failIfMajorPerformanceCaveat: false }
+  ];
+  var lastErr = null;
+  for (var i = 0; i < attempts.length; i++) {
+    try {
+      var r = new THREE.WebGLRenderer(attempts[i]);
+      if (i > 0) console.warn('[Mineradio] 主渲染器使用降级参数创建 (attempt ' + i + ')');
+      return r;
+    } catch (e) { lastErr = e; console.error('[Mineradio] WebGLRenderer 创建失败 attempt ' + i, e && e.message || e); }
+  }
+  throw lastErr || new Error('WebGLRenderer creation failed');
+}
+var renderer = createMainRenderer();
 renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(getRenderPixelRatio());
 renderer.setSize(innerWidth, innerHeight);
@@ -3804,6 +3869,15 @@ renderer.domElement.style.width = '100%';
 renderer.domElement.style.height = '100%';
 renderer.domElement.tabIndex = 0;
 document.getElementById('canvas-container').appendChild(renderer.domElement);
+// WebGL context lost/restored 兜底：丢失时不让异常冒泡，恢复时重编译。
+renderer.domElement.addEventListener('webglcontextlost', function (ev) {
+  ev.preventDefault();
+  console.warn('[Mineradio] WebGL context lost');
+}, false);
+renderer.domElement.addEventListener('webglcontextrestored', function () {
+  console.warn('[Mineradio] WebGL context restored');
+  try { renderer.setPixelRatio(getRenderPixelRatio()); renderer.setSize(innerWidth, innerHeight); } catch (e) {}
+}, false);
 
 // ============================================================
 //  相机系统 v7.1 — 分离 user offset / cinema offset
@@ -16015,6 +16089,15 @@ function updateEmptyHomeVisibility(opts) {
       homeDiscoverState.playlists = [];
       homeDiscoverState.podcasts = [];
       renderHomeDiscover();
+    } else if (preferredMusicProvider && preferredMusicProvider() !== 'netease') {
+      homeDiscoverState.loading = false;
+      homeDiscoverState.loaded = true;
+      homeDiscoverState.loggedIn = true;
+      homeDiscoverState.mode = preferredMusicProvider();
+      homeDiscoverState.songs = [];
+      homeDiscoverState.playlists = [];
+      homeDiscoverState.podcasts = [];
+      renderHomeDiscover();
     } else {
       renderHomeDiscover();
       scheduleVisualApply(function(){ loadHomeDiscover(!!opts.forceLoad); }, 220, 1200);
@@ -16040,6 +16123,25 @@ function runHomeSearch(query, mode) {
   else if (searchMode === 'podcast') loadPodcastHot();
   else renderSearchHistory();
 }
+async function searchAndPlayFirstForActiveProvider(query) {
+  var q = String(query || '').trim() || '每日推荐';
+  var mode = providerSearchMode();
+  setSearchMode(mode);
+  var songs = await fetchMusicSearchResults(q, mode);
+  songs = filterSongsForActiveProvider(songs);
+  if (!songs.length) {
+    runHomeSearch(q, mode);
+    return;
+  }
+  playlist = songs;
+  renderSongSearchResults(songs);
+  playQueue = songs.map(cloneSong);
+  currentIdx = 0;
+  safeRenderQueuePanel('home-search-play');
+  safeShelfRebuild('home-search-play', true);
+  forcePlaybackControlsInteractive();
+  await playQueueAt(0).catch(function(e){ console.warn('[HomeSearchPlay]', e); });
+}
 function skipLoginAndFocusSearch() {
   closeLoginModal();
   setTimeout(function(){ runHomeSearch(''); }, 180);
@@ -16062,6 +16164,43 @@ async function waitForHomeDiscoverIdle(timeout) {
     await new Promise(function(resolve){ setTimeout(resolve, 80); });
   }
 }
+async function playKugouDailyRecommend() {
+  // 酷狗真·每日推荐(个性化)。成功返回 true，失败返回 false 交由上层降级。
+  try {
+    var src = window.MineradioKugouSource;
+    if (!src || !src.dailyUrl) return false;
+    var resp = await fetch(src.dailyUrl());
+    var data = await resp.json();
+    if (!data || !Array.isArray(data.songs) || !data.songs.length) return false;
+    playQueue = filterSongsForActiveProvider(data.songs.map(cloneSong));
+    if (!playQueue.length) return false;
+    currentIdx = 0;
+    safeRenderQueuePanel('kugou-daily');
+    safeShelfRebuild('kugou-daily', true);
+    forcePlaybackControlsInteractive();
+    playQueueAt(0).catch(function(e){ console.warn('[KugouDailyPlay]', e); });
+    return true;
+  } catch (e) {
+    console.warn('[KugouDailyPlay] fetch failed', e);
+    return false;
+  }
+}
+
+async function playPlatformDailyFromPlaylists() {
+  await refreshUserPlaylists(true);
+  var provider = preferredMusicProvider();
+  var candidates = userPlaylists.filter(function(pl){
+    if (!pl || (pl.provider || 'netease') !== provider) return false;
+    var name = String(pl.name || '');
+    return /每日|日推|今日|推荐|私人|雷达/i.test(name);
+  });
+  var item = candidates[0] || userPlaylists.find(function(pl){ return pl && (pl.provider || 'netease') === provider; });
+  if (item && item.id) {
+    await loadPlaylistIntoQueueById(playlistPanelProviderId(provider, item.id), true, item.name || '每日推荐');
+    return true;
+  }
+  return false;
+}
 async function playHomeDaily() {
   homeForcedOpen = false;
   homeSuppressed = false;
@@ -16071,14 +16210,30 @@ async function playHomeDaily() {
     return;
   }
   await waitForHomeDiscoverIdle();
+  if (preferredMusicProvider && preferredMusicProvider() !== 'netease') {
+    var provider = preferredMusicProvider();
+    if (provider === 'kugou') {
+      var playedKugouDaily = await playKugouDailyRecommend();
+      if (playedKugouDaily) return;
+    }
+    var playedProviderDaily = await playPlatformDailyFromPlaylists();
+    if (!playedProviderDaily) showToast('当前平台暂未返回每日推荐歌单');
+    return;
+  }
   if (!homeDiscoverState.loaded || (!homeDiscoverState.songs.length && !homeDiscoverState.loading)) {
     await loadHomeDiscover(true);
   }
   if (!homeDiscoverState.songs.length) {
-    runHomeSearch('每日推荐');
+    var playedDailyList = await playPlatformDailyFromPlaylists();
+    if (!playedDailyList) showToast('当前平台暂未返回每日推荐歌单');
     return;
   }
-  playQueue = homeDiscoverState.songs.map(cloneSong);
+  playQueue = filterSongsForActiveProvider(homeDiscoverState.songs.map(cloneSong));
+  if (!playQueue.length) {
+    var playedProviderList = await playPlatformDailyFromPlaylists();
+    if (!playedProviderList) showToast('当前平台暂未返回每日推荐歌曲');
+    return;
+  }
   currentIdx = 0;
   safeRenderQueuePanel('home-daily');
   safeShelfRebuild('home-daily', true);
@@ -16098,7 +16253,11 @@ async function playHomePrivateRadio() {
     await loadHomeDiscover(true);
   }
   if (homeDiscoverState.songs.length) {
-    playQueue = homeDiscoverState.songs.map(cloneSong);
+    playQueue = filterSongsForActiveProvider(homeDiscoverState.songs.map(cloneSong));
+    if (!playQueue.length) {
+      await searchAndPlayFirstForActiveProvider('私人雷达');
+      return;
+    }
     currentIdx = 0;
     safeRenderQueuePanel('home-private-radio');
     safeShelfRebuild('home-private-radio', true);
@@ -16108,10 +16267,14 @@ async function playHomePrivateRadio() {
   }
   var item = homeDiscoverState.playlists[0];
   if (item && item.id) {
+    if (preferredMusicProvider && preferredMusicProvider() !== 'netease') {
+      await searchAndPlayFirstForActiveProvider(item.name || '私人雷达');
+      return;
+    }
     await loadPlaylistIntoQueueById(item.id, true, item.name || '私人雷达');
     return;
   }
-  openHomeLibrary();
+  await searchAndPlayFirstForActiveProvider('私人雷达');
 }
 function playHomeSong(index) {
   homeForcedOpen = false;
@@ -16123,8 +16286,13 @@ function playHomeSong(index) {
     else playHomeDaily();
     return;
   }
-  playQueue = homeDiscoverState.songs.map(cloneSong);
-  currentIdx = Math.max(0, Math.min(playQueue.length - 1, index));
+  playQueue = filterSongsForActiveProvider(homeDiscoverState.songs.map(cloneSong));
+  if (!playQueue.length) {
+    searchAndPlayFirstForActiveProvider(song.name || '每日推荐');
+    return;
+  }
+  currentIdx = Math.max(0, Math.min(playQueue.length - 1, playQueue.findIndex(function(item){ return item && item.name === song.name && item.artist === song.artist; })));
+  if (currentIdx < 0) currentIdx = 0;
   safeRenderQueuePanel('home-song-card');
   safeShelfRebuild('home-song-card', true);
   forcePlaybackControlsInteractive();
@@ -16299,12 +16467,12 @@ function songFromListenRecord(record) {
 async function playHomeRecent(record) {
   record = record || homeListenSummary().recent;
   if (!record) {
-    showToast('还没有听歌记录');
+    await searchAndPlayFirstForActiveProvider('每日推荐');
     return;
   }
   var song = songFromListenRecord(record);
-  if (!song || (!song.id && !song.mid)) {
-    runHomeSearch(record.name || '');
+  if (!song || (!song.id && !song.mid) || !songProviderAllowed(song)) {
+    await searchAndPlayFirstForActiveProvider(record.name || '继续听');
     return;
   }
   activeRadioContext = null;
@@ -16316,16 +16484,7 @@ async function playHomeRecent(record) {
   await playQueueAt(0);
 }
 function openHomeInsight() {
-  var summary = homeListenSummary();
-  if (summary.topArtist && summary.topArtist.name) {
-    runHomeSearch(summary.topArtist.name);
-    return;
-  }
-  if (summary.topSong && summary.topSong.name) {
-    runHomeSearch(summary.topSong.name);
-    return;
-  }
-  showToast('播放几首歌后会生成听歌画像');
+  showToast('听歌画像已收起，专注播放和视觉体验');
 }
 async function playWeatherSong(index) {
   var radio = homeWeatherRadioState.radio;
@@ -17583,6 +17742,28 @@ document.addEventListener('click', function(e){
 });
 updateSearchModeTabs();
 
+function preferredMusicProvider() {
+  if (hasPlatformLogin(activeAccountProvider)) return activeAccountProvider;
+  if (hasPlatformLogin('kugou')) return 'kugou';
+  if (hasPlatformLogin('qq')) return 'qq';
+  if (hasPlatformLogin('netease')) return 'netease';
+  return activeAccountProvider || 'netease';
+}
+function providerSearchMode(provider) {
+  provider = provider === 'qq' || provider === 'kugou' || provider === 'netease' ? provider : preferredMusicProvider();
+  return provider;
+}
+function songProviderAllowed(song) {
+  var provider = preferredMusicProvider();
+  if (!hasPlatformLogin(provider)) return true;
+  return songProviderKey(song) === provider;
+}
+function filterSongsForActiveProvider(songs) {
+  songs = Array.isArray(songs) ? songs : [];
+  var provider = preferredMusicProvider();
+  if (!hasPlatformLogin(provider)) return songs;
+  return songs.filter(function(song){ return songProviderKey(song) === provider; });
+}
 function songProviderKey(song) {
   if (song && (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq')) return 'qq';
   if (window.MineradioKugouSource && window.MineradioKugouSource.isSong(song)) return 'kugou';
@@ -17597,8 +17778,8 @@ function searchResultMetaText(song) {
   var bits = [];
   if (song.artist) bits.push(song.artist);
   if (song.album) bits.push(song.album);
-  if (songProviderKey(song) === 'qq' && !song.playable) bits.push('QQ 播放需会话/授权');
-  if (songProviderKey(song) === 'kugou' && !song.playable) bits.push('酷狗播放需会话/授权');
+  if (songProviderKey(song) === 'qq' && !song.playable) bits.push('QQ 音源');
+  if (songProviderKey(song) === 'kugou' && !song.playable) bits.push('酷狗音源');
   return bits.join('  ·  ') || songSourceLabel(song);
 }
 function searchResultMetaHtml(song, index) {
@@ -17606,8 +17787,8 @@ function searchResultMetaHtml(song, index) {
   var artist = String(song.artist || '').trim();
   var bits = [];
   if (song.album) bits.push(song.album);
-  if (songProviderKey(song) === 'qq' && !song.playable) bits.push('QQ 播放需会话/授权');
-  if (songProviderKey(song) === 'kugou' && !song.playable) bits.push('酷狗播放需会话/授权');
+  if (songProviderKey(song) === 'qq' && !song.playable) bits.push('QQ 音源');
+  if (songProviderKey(song) === 'kugou' && !song.playable) bits.push('酷狗音源');
   var tail = bits.length ? (' · ' + escHtml(bits.join('  ·  '))) : '';
   if (!artist) return escHtml(searchResultMetaText(song));
   return '<button class="search-artist-link" type="button" onclick="event.stopPropagation();openSearchResultArtist(' + index + ')">' + escHtml(artist) + '</button>' + tail;
@@ -17744,6 +17925,7 @@ async function fetchMusicSearchResults(q, mode) {
     var neOnly = await apiJson('/api/search?keywords=' + encodeURIComponent(q) + '&limit=18');
     return mergeSongSearchResults(neOnly.songs || [], [], 18, q);
   }
+  if (hasAnyPlatformLogin()) return fetchMusicSearchResults(q, providerSearchMode());
   var result = await Promise.allSettled([
     apiJson('/api/search?keywords=' + encodeURIComponent(q) + '&limit=14'),
     apiJson('/api/qq/search?keywords=' + encodeURIComponent(q) + '&limit=12'),
@@ -18240,10 +18422,16 @@ function playSearchResult(i) {
 var firstPlayDone = false;
 
 function playbackProviderLabel(song) {
-  return songProviderKey(song) === 'qq' ? 'QQ 音乐' : '网易云';
+  var provider = songProviderKey(song);
+  if (provider === 'qq') return 'QQ 音乐';
+  if (provider === 'kugou') return '酷狗音乐';
+  return '网易云';
 }
 function playbackLoginProvider(song) {
-  return songProviderKey(song) === 'qq' ? 'qq' : 'netease';
+  var provider = songProviderKey(song);
+  if (provider === 'qq') return 'qq';
+  if (provider === 'kugou') return 'kugou';
+  return 'netease';
 }
 function playbackRestrictionMessage(song, data) {
   data = data || {};
@@ -18260,7 +18448,7 @@ function playbackRestrictionMessage(song, data) {
     else message = provider + '没有返回可播放地址';
   }
   if (category === 'login_required') return message + ' · 正在打开登录';
-  if (category === 'copyright_unavailable' || category === 'url_unavailable') return message + ' · 可以试试另一个平台版本';
+  if (category === 'copyright_unavailable' || category === 'url_unavailable') return message;
   return message;
 }
 function qqPlaybackRetryQualities(requestedQuality, resolvedLevel) {
@@ -18408,6 +18596,7 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
   var restriction = (data && data.restriction) || {};
   var category = (data && data.reason) || restriction.category || '';
   var fromLabel = playbackProviderLabel(song);
+  if (hasAnyPlatformLogin()) return false;
   var targetLabel = alternatePlaybackProvider(song) === 'qq' ? 'QQ 音乐' : '网易云';
   showSourceFallbackNotice('正在自动换源', fromLabel + ' 当前不可播，正在查找 ' + targetLabel + ' 的同名同歌手版本。');
   try {
@@ -18437,7 +18626,10 @@ function handlePlaybackUnavailable(song, data) {
   var provider = playbackLoginProvider(song);
   var restriction = (data && data.restriction) || {};
   var category = (data && data.reason) || restriction.category || '';
-  showToast(playbackRestrictionMessage(song, data));
+  if (category === 'login_required' && hasPlatformLogin(provider)) {
+    category = 'url_unavailable';
+  }
+  showToast(playbackRestrictionMessage(song, Object.assign({}, data || {}, { reason: category, restriction: Object.assign({}, restriction, { category: category }) })));
   if (category === 'login_required') {
     setTimeout(function(){
       var modal = document.getElementById('login-modal');
@@ -18616,12 +18808,12 @@ async function playQueueAt(idx, opts) {
       if (data.loggedIn && data.vipLevel === 'svip') txt = '此歌曲需要单曲、专辑购买或更高权限';
       else if (data.loggedIn && data.vipLevel === 'vip') txt = '此歌曲需要 SVIP 或购买 · 当前仅播放试听片段';
       else if (data.loggedIn) txt = '此歌曲需 VIP · 当前仅播放试听片段';
-      else txt = '当前未登录 · 仅播放试听片段';
+      else txt = hasPlatformLogin(playProvider) ? (playbackProviderLabel(song) + '仅返回试听片段') : (playbackProviderLabel(song) + '未登录 · 仅播放试听片段');
       document.getElementById('trial-text').textContent = txt;
       var trialLoginBtn = document.getElementById('trial-login-btn');
       if (trialLoginBtn) {
-        trialLoginBtn.style.display = data.loggedIn ? 'none' : '';
-        trialLoginBtn.onclick = function(){ openProviderLogin('netease'); };
+        trialLoginBtn.style.display = (data.loggedIn || hasPlatformLogin(playProvider)) ? 'none' : '';
+        trialLoginBtn.onclick = function(){ openProviderLogin(playProvider); };
       }
       document.getElementById('trial-banner').classList.add('show');
     }
@@ -19518,6 +19710,31 @@ document.addEventListener('click', function(e){
 bindSmoothQueueScrolling();
 bindPlaylistPanelLazyRender();
 bindModalBackdropClose();
+var playlistSyncReloginProvider = '';
+function playlistSyncProblemText(activeProvider, result) {
+  result = result || [];
+  var kg = result[3] || {};
+  var qq = result[2] || {};
+  var ne = result[0] || {};
+  playlistSyncReloginProvider = '';
+  if (activeProvider === 'kugou' && kg.privateUnavailable) {
+    playlistSyncReloginProvider = 'kugou';
+    if (kg.missingToken) return '酷狗歌单授权不完整，请重新扫码登录';
+    if (kg.emptyPrivateList) return '酷狗私有歌单暂未返回，请稍后刷新或重新扫码';
+    return '酷狗歌单授权已过期，请重新扫码登录';
+  }
+  if (activeProvider === 'qq' && qq.error) { playlistSyncReloginProvider = 'qq'; return 'QQ 音乐歌单同步失败，请重新登录'; }
+  if (activeProvider === 'netease' && ne.error) { playlistSyncReloginProvider = 'netease'; return '网易云歌单同步失败，请重新登录'; }
+  return '当前已登录账号暂无可显示歌单';
+}
+function updatePlaylistReloginButton() {
+  var btn = document.getElementById('playlist-relogin-btn');
+  if (!btn) return;
+  btn.style.display = playlistSyncReloginProvider ? '' : 'none';
+}
+function openPlaylistRelogin() {
+  showLoginModal({ provider: playlistSyncReloginProvider || preferredMusicProvider(), source: 'playlist-sync' });
+}
 function renderQueuePanel(opts) {
   opts = opts || {};
   var $ql = document.getElementById('queue-list');
@@ -19547,6 +19764,10 @@ function renderQueuePanel(opts) {
   renderMiniQueuePanel({ scrollCurrent: miniQueueOpen });
 }
 async function refreshUserPlaylists(force) {
+  var playlistChip = document.getElementById('playlist-login-chip');
+  if (playlistChip) playlistChip.textContent = hasAnyPlatformLogin() ? '正在同步已登录账号歌单' : '登录后显示网易云 / QQ / 酷狗歌单';
+  playlistSyncReloginProvider = '';
+  updatePlaylistReloginButton();
   if (!loginStatus.loggedIn && !qqLoginStatus.loggedIn && !kugouLoginStatus.loggedIn) {
     resetPlaylistPanelRenderLimit();
     document.getElementById('pl-list').innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">登录后显示个人歌单</div>';
@@ -19582,7 +19803,13 @@ async function refreshUserPlaylists(force) {
     var neteaseLists = (result[0].playlists || []).map(function(pl){ pl.provider = 'netease'; pl.source = 'netease'; return pl; });
     qqPlaylists = (result[2].playlists || []).map(function(pl){ pl.provider = 'qq'; pl.source = 'qq'; return pl; });
     kugouPlaylists = (result[3].playlists || []).map(function(pl){ pl.provider = 'kugou'; pl.source = 'kugou'; return pl; });
-    userPlaylists = neteaseLists.concat(qqPlaylists, kugouPlaylists);
+    var combinedLists = neteaseLists.concat(qqPlaylists, kugouPlaylists);
+    var activeProvider = preferredMusicProvider();
+    // 已登录平台的歌单都应该进入列表；渲染层会按 provider 分组展示。
+    // 旧逻辑在 dualAccountMode=false 时只保留 activeProvider，导致只登录/主用酷狗以外平台时，酷狗歌单被同步后又被过滤掉。
+    userPlaylists = combinedLists;
+    if (playlistChip) playlistChip.textContent = userPlaylists.length ? ('已同步 ' + userPlaylists.length + ' 个歌单') : playlistSyncProblemText(activeProvider, result);
+    updatePlaylistReloginButton();
     myPodcastCollections = result[1].collections || [];
     var animatePanel = isPlaylistPanelVisibleForRender();
     renderUserPlaylistsList({ animate: animatePanel, reset: true });
@@ -23406,7 +23633,16 @@ function providerVipLevel(provider, status) {
     if (status.isVip || status.is_vip || vip > 0) return 'vip';
     return 'none';
   }
+  if (provider === 'kugou') {
+    if (status.isSvip || status.is_svip || vip >= 7) return 'svip';
+    if (status.isVip || status.is_vip || vip > 0) return 'vip';
+    return 'none';
+  }
   return vip > 0 ? 'vip' : 'none';
+}
+function providerVipLevelLabel(provider, status) {
+  var level = providerVipLevel(provider, status);
+  return level === 'none' ? '无VIP' : (level === 'svip' ? 'SVIP' : 'VIP');
 }
 function hasProviderVip(provider, status) {
   return providerVipLevel(provider, status) !== 'none';
@@ -23431,9 +23667,9 @@ function hasAnyPlatformLogin() {
 }
 function firstLoggedProvider() {
   if (hasPlatformLogin(activeAccountProvider)) return activeAccountProvider;
-  if (hasPlatformLogin('netease')) return 'netease';
-  if (hasPlatformLogin('qq')) return 'qq';
   if (hasPlatformLogin('kugou')) return 'kugou';
+  if (hasPlatformLogin('qq')) return 'qq';
+  if (hasPlatformLogin('netease')) return 'netease';
   return 'netease';
 }
 function providerAvatarSrc(provider, status) {
@@ -23545,7 +23781,7 @@ function startQQLoginStatusAutoRefresh() {
   }, 45000);
 }
 function normalizeKugouLoginStatus(info) {
-  var fallback = { provider: 'kugou', loggedIn: false, preview: false, nickname: '酷狗音乐', userId: '', avatar: '', vipType: 0, stale: false };
+  var fallback = { provider: 'kugou', loggedIn: false, preview: false, nickname: '酷狗音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP', stale: false };
   if (!info || !info.loggedIn) return Object.assign({}, fallback, info || {}, {
     provider: 'kugou',
     loggedIn: false,
@@ -23553,6 +23789,10 @@ function normalizeKugouLoginStatus(info) {
     userId: info && (info.userId || info.userid) || '',
     avatar: info && info.avatar || '',
     vipType: Number(info && (info.vipType || info.vip_type) || 0) || 0,
+    vipLevel: String(info && (info.vipLevel || info.vip_level) || 'none').toLowerCase(),
+    isVip: !!(info && (info.isVip || info.is_vip)),
+    isSvip: !!(info && (info.isSvip || info.is_svip)),
+    vipLabel: String(info && info.vipLabel || fallback.vipLabel),
     stale: !!(info && info.stale)
   });
   return Object.assign({}, fallback, info, {
@@ -23562,6 +23802,10 @@ function normalizeKugouLoginStatus(info) {
     userId: info.userId || info.userid || '',
     avatar: info.avatar || '',
     vipType: Number(info.vipType || info.vip_type || 0) || 0,
+    vipLevel: String(info.vipLevel || info.vip_level || (info.isSvip || info.is_svip ? 'svip' : (info.isVip || info.is_vip ? 'vip' : (Number(info.vipType || info.vip_type || 0) > 0 ? 'vip' : 'none')))).toLowerCase(),
+    isVip: !!(info.isVip || info.is_vip || Number(info.vipType || info.vip_type || 0) > 0),
+    isSvip: !!(info.isSvip || info.is_svip || Number(info.vipType || info.vip_type || 0) >= 10),
+    vipLabel: String(info.vipLabel || (info.isSvip || info.is_svip || Number(info.vipType || info.vip_type || 0) >= 10 ? 'SVIP' : ((info.isVip || info.is_vip || Number(info.vipType || info.vip_type || 0) > 0) ? 'VIP' : '无VIP'))),
     stale: !!info.stale || !!(info.profileUnavailable && !(info.nickname && info.avatar))
   });
 }
@@ -23672,44 +23916,44 @@ function updateLoginProviderUi() {
   if (desc) desc.innerHTML = isQQ
     ? '打开 <b>QQ 音乐官方网页登录窗口</b> 扫码，成功后会自动同步账号会话。'
     : (isKugou
-      ? '导入 <b>酷狗音乐网页登录 cookie</b>，可同步酷狗账号会话和歌单。'
+      ? '使用 <b>酷狗音乐 App</b> 扫描下方二维码，确认后会自动同步账号会话。'
       : (canOpenNeteaseWeb
         ? '打开 <b>网易云音乐官方网页登录窗口</b> 扫码，避开接口二维码风控；成功后会自动同步账号会话。'
         : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。'));
   if (shell) {
-    shell.classList.toggle('web-login-preview', isWebProvider || canOpenNeteaseWeb);
-    shell.classList.toggle('qq-preview', isQQ || isKugou);
-    shell.classList.toggle('netease-preview', !isWebProvider && canOpenNeteaseWeb);
+    shell.classList.toggle('web-login-preview', isQQ || (!isKugou && canOpenNeteaseWeb));
+    shell.classList.toggle('qq-preview', isQQ);
+    shell.classList.toggle('netease-preview', !isQQ && !isKugou && canOpenNeteaseWeb);
   }
   if (qqPanel) qqPanel.classList.toggle('show', isWebProvider && qqManualCookieOpen);
-  if (cookieInput) cookieInput.placeholder = isKugou ? 'userid=...; dfid=...; mid=...' : 'uin=...; qqmusic_key=...; qm_keyst=...';
-  if (cookieNote) cookieNote.textContent = isKugou ? '从 www.kugou.com 的登录会话导入。' : '从 y.qq.com 的登录会话导入。';
+  if (cookieInput) cookieInput.placeholder = isKugou ? '如自动网页登录失败，可粘贴酷狗 cookie 兜底' : 'uin=...; qqmusic_key=...; qm_keyst=...';
+  if (cookieNote) cookieNote.textContent = isKugou ? '优先使用“网页登录”，手动导入只作为兜底。' : '从 y.qq.com 的登录会话导入。';
   if (cookieSaveBtn) cookieSaveBtn.onclick = isKugou ? submitKugouCookieLogin : submitQQCookieLogin;
   if (qqCookieToggle) {
     qqCookieToggle.classList.toggle('show', isWebProvider);
     qqCookieToggle.textContent = qqManualCookieOpen ? '收起导入' : '手动导入';
   }
   if (qqCard) {
-    qqCard.disabled = isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy);
+    qqCard.disabled = isQQ ? !!qqWebLoginBusy : (isKugou ? false : !!neteaseWebLoginBusy);
     var cardMark = qqCard.querySelector('b');
     var cardLabel = qqCard.querySelector('span');
     if (cardMark) cardMark.textContent = isQQ ? 'QQ' : (isKugou ? 'KG' : 'NE');
     if (cardLabel) cardLabel.textContent = isQQ
       ? (qqWebLoginBusy ? '等待扫码确认' : '打开官方扫码窗口')
-      : (isKugou ? '手动导入 Cookie' : (neteaseWebLoginBusy ? '等待扫码确认' : '打开官方登录窗口'));
+      : (isKugou ? '二维码已在下方显示' : (neteaseWebLoginBusy ? '等待扫码确认' : '打开官方登录窗口'));
   }
   if (st) {
-    st.className = isWebProvider ? 'preview' : '';
+    st.className = (isQQ || isKugou) ? 'preview' : '';
     st.textContent = isQQ
       ? (qqLoginStatus.loggedIn ? ('已保存 QQ 音乐会话 · ' + (qqLoginStatus.nickname || '')) : '点击“扫码登录”打开 QQ 音乐官方窗口')
       : (isKugou
-        ? (kugouLoginStatus.loggedIn ? ('已保存酷狗音乐会话 · ' + (kugouLoginStatus.nickname || '')) : '点击“手动导入”粘贴酷狗 cookie')
+        ? (kugouLoginStatus.loggedIn ? ('已保存酷狗音乐会话 · ' + (kugouLoginStatus.nickname || '')) : '正在生成酷狗二维码…')
         : (canOpenNeteaseWeb ? '点击“网页登录”打开网易云官方窗口' : '正在生成二维码…'));
   }
   if (refreshBtn) {
-    refreshBtn.disabled = isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy);
-    refreshBtn.textContent = isQQ ? (qqWebLoginBusy ? '等待扫码…' : '扫码登录') : (isKugou ? '手动导入' : (canOpenNeteaseWeb ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码'));
-    refreshBtn.onclick = isQQ ? openQQWebLogin : (isKugou ? toggleQQCookiePanel : (canOpenNeteaseWeb ? openNeteaseWebLogin : refreshQr));
+    refreshBtn.disabled = isQQ ? !!qqWebLoginBusy : (isKugou ? false : !!neteaseWebLoginBusy);
+    refreshBtn.textContent = isQQ ? (qqWebLoginBusy ? '等待扫码…' : '扫码登录') : (isKugou ? '刷新二维码' : (canOpenNeteaseWeb ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码'));
+    refreshBtn.onclick = isQQ ? openQQWebLogin : (isKugou ? refreshQr : (canOpenNeteaseWeb ? openNeteaseWebLogin : refreshQr));
   }
 }
 async function refreshQr() {
@@ -23717,6 +23961,7 @@ async function refreshQr() {
   updateLoginProviderUi();
   if (loginProvider === 'qq') {
     qrKey = null;
+    qrProvider = 'qq';
     var qqStatus = document.getElementById('qr-status');
     var qqImg = document.getElementById('qr-img');
     if (qqImg) qqImg.src = '';
@@ -23728,19 +23973,25 @@ async function refreshQr() {
     return;
   }
   if (loginProvider === 'kugou') {
-    qrKey = null;
+    qrProvider = 'kugou';
     var kgStatus = document.getElementById('qr-status');
     var kgImg = document.getElementById('qr-img');
-    if (kgImg) kgImg.src = '';
-    var kgInfo = await refreshKugouLoginStatus();
-    if (kgStatus) {
-      kgStatus.textContent = kgInfo && kgInfo.loggedIn ? ('已保存酷狗音乐会话 · ' + (kgInfo.nickname || '')) : '点击“手动导入”粘贴酷狗 cookie';
-      kgStatus.className = 'preview';
+    try {
+      if (kgImg) kgImg.src = '';
+      var qk = await apiJson('/api/kugou/login/qr/create?t=' + Date.now());
+      if (!qk || !qk.id || !qk.img) throw new Error((qk && qk.error) || '生成酷狗二维码失败');
+      qrKey = qk.id;
+      if (kgImg) kgImg.src = qk.img;
+      if (kgStatus) { kgStatus.textContent = '请使用酷狗音乐 App 扫码登录'; kgStatus.className = 'preview'; }
+      startQrPoll();
+    } catch (e) {
+      if (kgStatus) { kgStatus.textContent = '出错: ' + (e.message || e); kgStatus.className = 'fail'; }
     }
     return;
   }
   if (window.desktopWindow && typeof window.desktopWindow.openNeteaseMusicLogin === 'function') {
     qrKey = null;
+    qrProvider = 'netease';
     var neImg = document.getElementById('qr-img');
     var neStatus = document.getElementById('qr-status');
     if (neImg) neImg.src = '';
@@ -23751,6 +24002,7 @@ async function refreshQr() {
     return;
   }
   try {
+    qrProvider = 'netease';
     var k = await apiJson('/api/login/qr/key');
     if (!k.key) throw new Error('获取 key 失败');
     qrKey = k.key;
@@ -23772,7 +24024,7 @@ function toggleQQCookiePanel() {
 }
 function openProviderWebLogin() {
   if (loginProvider === 'qq') return openQQWebLogin();
-  if (loginProvider === 'kugou') return toggleQQCookiePanel();
+  if (loginProvider === 'kugou') return openKugouWebLogin();
   return openNeteaseWebLogin();
 }
 async function openNeteaseWebLogin() {
@@ -23868,6 +24120,53 @@ async function openQQWebLogin() {
     }
   }
 }
+async function openKugouWebLogin() {
+  if (kugouWebLoginBusy) return;
+  var statusEl = document.getElementById('qr-status');
+  var api = window.desktopWindow;
+  if (!api || !api.isDesktop || typeof api.openKugouMusicLogin !== 'function') {
+    qqManualCookieOpen = true;
+    updateLoginProviderUi();
+    if (statusEl) { statusEl.textContent = '当前环境不支持酷狗网页登录，可先使用手动导入兜底。'; statusEl.className = 'fail'; }
+    return;
+  }
+
+  kugouWebLoginBusy = true;
+  updateLoginProviderUi();
+  if (statusEl) { statusEl.textContent = '已打开酷狗音乐窗口，请扫码或完成官方登录…'; statusEl.className = 'preview'; }
+  try {
+    var result = await api.openKugouMusicLogin();
+    if (!result || !result.ok || !result.cookie) {
+      throw new Error((result && (result.message || result.error)) || '酷狗登录未完成');
+    }
+    if (statusEl) { statusEl.textContent = '正在同步酷狗音乐会话…'; statusEl.className = 'preview'; }
+    var info = await apiJson(window.MineradioKugouSource.loginCookieUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie: result.cookie })
+    });
+    if (!info || !info.loggedIn) throw new Error((info && (info.message || info.error)) || '酷狗会话不可用');
+    kugouLoginStatus = normalizeKugouLoginStatus(info);
+    activeAccountProvider = 'kugou';
+    qqManualCookieOpen = false;
+    renderUserBtn();
+    refreshUserPlaylists(true);
+    if (statusEl) { statusEl.textContent = '酷狗音乐会话已保存'; statusEl.className = 'scan'; }
+    setTimeout(function(){
+      closeLoginModal();
+      showToast('酷狗音乐已登录: ' + (info.nickname || info.userId || ''));
+    }, 420);
+  } catch (e) {
+    kugouWebLoginBusy = false;
+    updateLoginProviderUi();
+    if (statusEl) { statusEl.textContent = e && e.message ? e.message : '酷狗登录失败'; statusEl.className = 'fail'; }
+  } finally {
+    if (kugouWebLoginBusy) {
+      kugouWebLoginBusy = false;
+      updateLoginProviderUi();
+    }
+  }
+}
 async function submitQQCookieLogin() {
   if (qqCookieBusy) return;
   var input = document.getElementById('qq-cookie-input');
@@ -23946,14 +24245,28 @@ async function submitKugouCookieLogin() {
 async function checkQr() {
   if (!qrKey) return;
   try {
-    var r = await apiJson('/api/login/qr/check?key=' + encodeURIComponent(qrKey));
+    var checkUrl = qrProvider === 'kugou'
+      ? ('/api/kugou/login/qr/check?id=' + encodeURIComponent(qrKey))
+      : ('/api/login/qr/check?key=' + encodeURIComponent(qrKey));
+    var r = await apiJson(checkUrl);
     var $st = document.getElementById('qr-status');
     if (r.code === 800) { $st.textContent = '二维码已过期, 请刷新'; $st.className = 'fail'; stopQrPoll(); }
-    else if (r.code === 801) { $st.textContent = '请在 App 中扫码'; $st.className = ''; }
-    else if (r.code === 802) { $st.textContent = '已扫码, 请在手机确认…'; $st.className = 'scan'; }
+    else if (r.code === 801) { $st.textContent = r.message || '请在 App 中扫码'; $st.className = ''; }
+    else if (r.code === 802) { $st.textContent = r.message || '已扫码, 请在手机确认…'; $st.className = 'scan'; }
     else if (r.code === 803 && (r.loggedIn || r.hasCookie)) {
       $st.textContent = r.pendingProfile ? '登录成功，正在同步账号资料…' : '登录成功！'; $st.className = 'scan';
       stopQrPoll();
+      if (qrProvider === 'kugou') {
+        kugouLoginStatus = normalizeKugouLoginStatus(r);
+        activeAccountProvider = 'kugou';
+        renderUserBtn();
+        refreshUserPlaylists(true);
+        setTimeout(function(){
+          closeLoginModal();
+          showToast('酷狗音乐已登录: ' + (kugouLoginStatus.nickname || kugouLoginStatus.userId || ''));
+        }, 500);
+        return;
+      }
       loginStatus = r.loggedIn ? r : Object.assign({}, r, { loggedIn: true, pendingProfile: true, nickname: r.nickname || '网易云用户' });
       activeAccountProvider = 'netease';
       renderUserBtn();
@@ -23999,7 +24312,7 @@ function updateUserModalUi() {
       vipEl.textContent = 'UID: ' + ((st && st.userId) || '-') + '  ·  ' + vipLabel;
       vipEl.style.color = hasProviderVip('netease', st) ? 'rgba(244,210,138,0.86)' : 'rgba(255,255,255,0.5)';
     } else if (activeAccountProvider === 'kugou') {
-      var kgVipLabel = hasProviderVip('kugou', st) ? '酷狗 VIP 会员' : '酷狗音乐会话';
+      var kgVipLabel = hasProviderVip('kugou', st) ? ('酷狗 ' + providerVipLevelLabel('kugou', st)) : '酷狗音乐会话';
       vipEl.textContent = 'UID: ' + ((st && st.userId) || '-') + '  ·  ' + kgVipLabel;
       vipEl.style.color = hasProviderVip('kugou', st) ? 'rgba(22,154,243,0.86)' : 'rgba(22,154,243,0.60)';
     } else {
@@ -26116,33 +26429,21 @@ document.addEventListener('DOMContentLoaded', function(){
   var s = document.getElementById('splash');
   if (!s) return;
   markAppPerf('dom-content-loaded');
-  armSplashSoundFallback();
-  prewarmHomeWallpaperPreview();
-  // 注入 gesture-engine 命令回调 (切歌 / 歌单架旋转 / HUD / Toast)
-  if (window.MineradioGesture && MineradioGesture.bind) {
-    MineradioGesture.bind({
-      onPLAY_PAUSE:  function () { if (typeof togglePlay === 'function') togglePlay(); },
-      onNEXT_TRACK:  function () { if (typeof nextTrack === 'function') nextTrack(); },
-      onPREV_TRACK:  function () { if (typeof prevTrack === 'function') prevTrack(); },
-      onSHELF_ROTATE: function (cmd) {
-        if (typeof shelfManager === 'undefined' || !shelfManager) return;
-        if (cmd.dir > 0 && shelfManager.next) shelfManager.next();
-        else if (cmd.dir < 0 && shelfManager.prev) shelfManager.prev();
-      },
-      onSHELF_FOCUS: function () {
-        // 聚焦歌单架: 切到 side 模式 (若已在 side 则保持)
-        if (typeof shelfManager === 'undefined' || !shelfManager) return;
-        if (shelfManager.getMode && shelfManager.getMode() === 'off' && shelfManager.setMode) {
-          shelfManager.setMode('side');
-        }
-      },
-      onHud:  function (label, progress, detail) { if (typeof showGestureHUD === 'function') showGestureHUD(label, progress, detail); },
-      onToast:function (msg) { if (typeof showToast === 'function') showToast(msg); }
-    });
-  }
+
+  // —— 先绑定开屏交互（点击/键盘/ready 定时器）——
+  // 这些必须最先注册，确保即使后续辅助初始化抛异常，用户也始终能点击进入，
+  // 不会出现「开屏能显示但完全点不动」的静默冻死。
   function requestSplashEnter() {
-    playMineradioIntroSound();
-    if (splashReadyToEnter) dismissSplash();
+    try { playMineradioIntroSound(); } catch (e) {}
+    if (splashReadyToEnter) {
+      try { dismissSplash(); }
+      catch (e) {
+        // 兜底：真实退场逻辑异常时，至少强制隐藏开屏，避免卡死。
+        console.error('[Mineradio] dismissSplash 异常，强制隐藏开屏', e && e.message || e);
+        s.classList.add('hide'); s.style.display = 'none';
+        document.body.classList.remove('splash-active');
+      }
+    }
   }
   s.addEventListener('click', requestSplashEnter);
   document.addEventListener('keydown', function(e){
@@ -26155,10 +26456,38 @@ document.addEventListener('DOMContentLoaded', function(){
   if (reduceSplashMotion) {
     s.classList.add('reduce-motion');
     splashTimer = setTimeout(markSplashReadyToEnter, 900);
-    return;
+  } else {
+    splashTimer = setTimeout(markSplashReadyToEnter, 5000);
   }
-  playMineradioIntroSound();
-  splashTimer = setTimeout(markSplashReadyToEnter, 5000);
+
+  // —— 再做辅助初始化（逐个隔离，任一异常都不影响开屏交互）——
+  try { armSplashSoundFallback(); } catch (e) { console.error('[Mineradio] armSplashSoundFallback', e); }
+  try { prewarmHomeWallpaperPreview(); } catch (e) { console.error('[Mineradio] prewarmHomeWallpaperPreview', e); }
+  if (!reduceSplashMotion) { try { playMineradioIntroSound(); } catch (e) {} }
+  // 注入 gesture-engine 命令回调 (切歌 / 歌单架旋转 / HUD / Toast)
+  try {
+    if (window.MineradioGesture && MineradioGesture.bind) {
+      MineradioGesture.bind({
+        onPLAY_PAUSE:  function () { if (typeof togglePlay === 'function') togglePlay(); },
+        onNEXT_TRACK:  function () { if (typeof nextTrack === 'function') nextTrack(); },
+        onPREV_TRACK:  function () { if (typeof prevTrack === 'function') prevTrack(); },
+        onSHELF_ROTATE: function (cmd) {
+          if (typeof shelfManager === 'undefined' || !shelfManager) return;
+          if (cmd.dir > 0 && shelfManager.next) shelfManager.next();
+          else if (cmd.dir < 0 && shelfManager.prev) shelfManager.prev();
+        },
+        onSHELF_FOCUS: function () {
+          // 聚焦歌单架: 切到 side 模式 (若已在 side 则保持)
+          if (typeof shelfManager === 'undefined' || !shelfManager) return;
+          if (shelfManager.getMode && shelfManager.getMode() === 'off' && shelfManager.setMode) {
+            shelfManager.setMode('side');
+          }
+        },
+        onHud:  function (label, progress, detail) { if (typeof showGestureHUD === 'function') showGestureHUD(label, progress, detail); },
+        onToast:function (msg) { if (typeof showToast === 'function') showToast(msg); }
+      });
+    }
+  } catch (e) { console.error('[Mineradio] gesture bind', e); }
 });
 
 var desktopOverlayPushState = {

@@ -3726,6 +3726,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pn === '/api/kugou/daily') {
+    try {
+      const data = await kugou.handleDailyRecommend();
+      sendJSON(res, data);
+    } catch (err) {
+      console.error('[KugouDaily]', err);
+      sendJSON(res, { provider: 'kugou', loggedIn: false, error: err.message, songs: [] }, 500);
+    }
+    return;
+  }
+
   if (pn === '/api/kugou/playlist/tracks') {
     try {
       const id = url.searchParams.get('id') || url.searchParams.get('specialid') || '';
