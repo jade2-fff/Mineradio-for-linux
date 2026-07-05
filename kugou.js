@@ -1035,21 +1035,23 @@ function createKugouProvider(deps) {
     const paid = mobileInfo && (Number(mobileInfo.pay_type || 0) > 0 || Number(mobileInfo.privilege || 0) > 0 || /付费|会员|VIP/i.test(String(mobileInfo.error || '')));
     // 注意：30001 是 m3ws "data not found" 噪音，不代表签名失败，不纳入签名判定。
     const signatureUnavailable = /Bad key|signature|\bsign\b|authorization|unauthorized|鉴权|签名/i.test(serviceErrorText);
-    const reason = paid
-      ? (permissionState.isVip && !permissionState.hasVipToken ? 'vip_token_required' : 'paid_required')
-      : (signatureUnavailable ? 'signature_or_authorization_unavailable' : 'url_unavailable');
-    const message = reason === 'vip_token_required'
-      ? '酷狗会员权限未同步完整，请重新扫码登录以获取会员播放授权'
+    // 已登录 VIP 却拿不到付费歌地址：这是本播放器对酷狗客户端取址能力适配未完成所致，
+    // 并非用户账号权限不足（同一账号在酷狗官方客户端可正常播放）。如实说明并引导换源，
+    // 避免给用户"你的会员不够"的错误归因。
+    const vipButUnavailable = paid && permissionState.isVip;
+    const reason = vipButUnavailable
+      ? 'client_playback_unsupported'
+      : (paid
+        ? 'paid_required'
+        : (signatureUnavailable ? 'signature_or_authorization_unavailable' : 'url_unavailable'));
+    const message = reason === 'client_playback_unsupported'
+      ? '酷狗会员歌曲暂时无法在本播放器取得播放地址（客户端取址适配未完成），可切换到 QQ 音乐或网易云音源播放'
       : (reason === 'paid_required'
-        ? (permissionState.isVip
-          ? '这首歌需要单独购买或更高等级会员权限，当前账号权限不足'
-          : '酷狗当前歌曲需要会员或购买，请登录会员账号后重试')
+        ? '酷狗当前歌曲需要会员或购买，请登录酷狗会员账号，或切换到其他音源'
         : (reason === 'signature_or_authorization_unavailable'
-          ? '酷狗播放接口授权暂未接通，当前歌曲未返回可播放地址'
-          : '酷狗未返回可播放地址，可能受版权限制'));
-    const action = reason === 'vip_token_required'
-      ? 'login'
-      : (reason === 'paid_required' ? (permissionState.isVip ? 'switch_source' : 'login') : 'switch_source');
+          ? '酷狗播放接口暂未取得可播放地址，可切换到其他音源'
+          : '酷狗未返回可播放地址，可能受版权限制，可切换到其他音源'));
+    const action = reason === 'paid_required' ? 'login' : 'switch_source';
     return {
       provider: 'kugou',
       url: '',

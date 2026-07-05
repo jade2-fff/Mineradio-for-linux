@@ -160,7 +160,7 @@ async function testLoginInfoRefreshesVipTokenFromAndroidSession() {
   assert.ok(saved.includes('vip_token=fresh-vip-token'));
 }
 
-async function testVipWithoutVipTokenRequiresReloginForPaidSongs() {
+async function testVipPaidSongReportsClientUnsupportedNotAccountFault() {
   const cookieFile = path.join(__dirname, '.tmp-kugou-vip-missing-token-cookie');
   require('fs').writeFileSync(cookieFile, 'userid=42; token=login-token; vip_type=1; dfid=dfid-1; mid=mid-1');
   const kugou = createKugouProvider({
@@ -180,11 +180,12 @@ async function testVipWithoutVipTokenRequiresReloginForPaidSongs() {
   });
   const result = await kugou.handleSongUrl('ABCDEF123456', '456', 'hires');
   assert.strictEqual(result.isVip, true);
-  assert.strictEqual(result.hasVipToken, false);
-  // 移动接口权威返回"需要付费/pay_type/privilege"时应判为会员权限未同步（需重新登录），
-  // 而非被 m3ws 的 30001 噪音误判成签名/授权问题。
-  assert.strictEqual(result.reason, 'vip_token_required');
-  assert.ok(/会员|登录|授权/.test(result.message || ''));
+  // 已登录 VIP 却取不到付费歌地址时，应归因为本播放器取址适配未完成并引导换源，
+  // 不能提示"账号权限不足"（同账号在酷狗官方客户端可正常播放）。
+  assert.strictEqual(result.reason, 'client_playback_unsupported');
+  assert.strictEqual(result.restriction.action, 'switch_source');
+  assert.ok(/换源|音源|QQ|网易/.test(result.message || ''), 'VIP 取址失败应引导换源');
+  assert.ok(!/权限不足|会员不够/.test(result.message || ''), '不得把失败归因为用户账号权限');
 }
 
 async function testSongUrlUsesM3wsAndAlbumAudioId() {
@@ -240,7 +241,7 @@ testSearchFallsBackWhenComplexSearchSignatureFails()
   .then(testPaidSongUrlIsUnavailableNotHttpFailure)
   .then(testPaidSongUrlCarriesVipLoginStateAndToken)
   .then(testLoginInfoRefreshesVipTokenFromAndroidSession)
-  .then(testVipWithoutVipTokenRequiresReloginForPaidSongs)
+  .then(testVipPaidSongReportsClientUnsupportedNotAccountFault)
   .then(testSongUrlUsesM3wsAndAlbumAudioId)
   .then(testBadKeyIsReportedAsAuthorizationNotCopyright)
   .then(() => console.log('ok'))
