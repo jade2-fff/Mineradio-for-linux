@@ -1287,58 +1287,41 @@ function createKugouProvider(deps) {
   async function handleLyric(hash) {
     const songHash = String(hash || '').trim();
     if (!songHash) return { provider: 'kugou', error: 'Missing kugou song hash', lyric: '' };
-    // 1. 先取搜索结果里的 album_id / 歌名
-    let songName = '';
-    let durationMs = 0;
-    try {
-      const searchJson = await kugouRequest('https://msearchcdn.kugou.com/api/v3/search/song', {
-        keyword: songHash,
-        pagesize: 1,
-        page: 1,
-        hash: songHash,
-      }, { signed: false });
-      const info = searchJson && searchJson.data && searchJson.data.info && searchJson.data.info[0];
-      if (info) {
-        songName = info.songname || info.song || '';
-        durationMs = (Number(info.duration) || 0) * 1000;
-      }
-    } catch (e) {
-      console.warn('[KugouLyric] search album failed:', e.message);
-    }
-    // 2. 调歌词接口
     let lyricText = '';
-    let transText = '';
-    let romaText = '';
+    // lyrics.kugou.com 按 hash 搜候选再下载 LRC，替代原 msearchcdn(证书不匹配)+krc.php 流程。
     try {
-      const u = new URL('https://m.kugou.com/app/i/krc.php');
-      u.searchParams.set('keyword', songName || songHash);
-      u.searchParams.set('hash', songHash);
-      u.searchParams.set('timelength', String(Math.floor(durationMs / 1000) || 0));
-      u.searchParams.set('cmd', '100');
-      u.searchParams.set('clientver', '1116');
-      u.searchParams.set('clientmobi', 'android');
-      u.searchParams.set('mid', kugouMid || '');
-      u.searchParams.set('dfid', kugouDfid || '');
-      const text = await requestText(u.toString(), { headers: { ...HEADERS, Referer: 'https://m.kugou.com/' } });
-      lyricText = String(text || '').replace(/^callback\(([\s\S]*)\);?$/, '$1').trim();
-      if (/^\{/.test(lyricText)) {
-        const json = JSON.parse(lyricText);
-        lyricText = decodeQQLyricText(json.lyric || json.content || '');
-        transText = decodeQQLyricText(json.translate || json.tlyric || '');
-        romaText = decodeQQLyricText(json.romalrc || json.roma || '');
+      const su = new URL('https://lyrics.kugou.com/search');
+      su.searchParams.set('ver', '1');
+      su.searchParams.set('man', 'yes');
+      su.searchParams.set('client', 'pc');
+      su.searchParams.set('hash', songHash);
+      const searchText = await requestText(su.toString(), { headers: { ...HEADERS, Referer: 'https://www.kugou.com/' } });
+      const searchJson = JSON.parse(searchText);
+      const cand = searchJson && Array.isArray(searchJson.candidates) && searchJson.candidates[0];
+      if (cand && cand.id && cand.accesskey) {
+        const du = new URL('https://lyrics.kugou.com/download');
+        du.searchParams.set('ver', '1');
+        du.searchParams.set('client', 'pc');
+        du.searchParams.set('id', String(cand.id));
+        du.searchParams.set('accesskey', String(cand.accesskey));
+        du.searchParams.set('fmt', 'lrc');
+        du.searchParams.set('charset', 'utf8');
+        const dlText = await requestText(du.toString(), { headers: { ...HEADERS, Referer: 'https://www.kugou.com/' } });
+        const dlJson = JSON.parse(dlText);
+        if (dlJson && dlJson.content) lyricText = Buffer.from(dlJson.content, 'base64').toString('utf8');
       }
     } catch (e) {
-      console.warn('[KugouLyric] krc.php failed:', e.message);
+      console.warn('[KugouLyric] fetch failed:', e.message);
     }
     return {
       provider: 'kugou',
       hash: songHash,
       lyric: lyricText,
-      tlyric: transText,
+      tlyric: '',
       yrc: '',
       qrc: '',
-      roma: romaText,
-      source: lyricText ? 'kugou-krc' : 'kugou-empty',
+      roma: '',
+      source: lyricText ? 'kugou-lrc' : 'kugou-empty',
     };
   }
 
@@ -1676,9 +1659,9 @@ function createKugouProvider(deps) {
       });
       return { loggedIn: true, provider: 'kugou', userId: info.userId, playlists };
     } catch (e) {
-      console.warn('[KugouUserPlaylists] gateway failed:', e.message);
+      // 首次 gateway 失败(常见 20017 token 偶发失效)，下面会注册设备+刷新 token 重试，不在此打日志。
       try {
-        try { await registerAndroidDevice(); } catch (devErr) { console.warn('[KugouUserPlaylists] register device failed:', devErr.message); }
+        try { await registerAndroidDevice(); } catch (devErr) { /* 重试链路内的设备注册失败静默，最终失败时统一记录 */ }
         const refreshed = await refreshAndroidLoginToken();
         if (refreshed) {
           const refreshedToken = loginToken();
@@ -1704,8 +1687,9 @@ function createKugouProvider(deps) {
           if (playlists.length) return { loggedIn: true, provider: 'kugou', userId: info.userId, playlists, privateSynced: true };
         }
       } catch (retryErr) {
-        console.warn('[KugouUserPlaylists] token refresh retry failed:', retryErr.message);
+        /* 重试失败，最终失败时统一记录一次 */
       }
+      console.warn('[KugouUserPlaylists] 私有歌单获取失败(已重试):', e.message);
       return { loggedIn: true, provider: 'kugou', userId: info.userId, playlists: [], privateUnavailable: true, error: e.message };
     }
   }
