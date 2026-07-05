@@ -1417,6 +1417,8 @@ function createKugouProvider(deps) {
   // 用户私有歌单曲目的 name 字段是 "歌手 - 歌名" 合并格式，需拆分。
   function mapCollectionSong(item) {
     item = item || {};
+    // pubsongs 返回结构化字段：singerinfo(歌手数组)、albuminfo(专辑)、cover(封面,含{size})。
+    // name 是 "歌手 - 歌名" 合并串，作为拆分兜底。
     const combined = String(item.name || item.filename || '').trim();
     let artist = '';
     let songName = combined;
@@ -1425,12 +1427,18 @@ function createKugouProvider(deps) {
       artist = combined.slice(0, sep).trim();
       songName = combined.slice(sep + 3).trim();
     }
+    const singers = Array.isArray(item.singerinfo)
+      ? item.singerinfo.map(s => ({ id: s.id, name: s.name })).filter(s => s.name)
+      : [];
     return mapSong({
       hash: item.hash,
       album_audio_id: item.audio_id,
       album_id: item.album_id,
       song: songName,
-      singername: artist,
+      singers: singers.length ? singers : undefined,
+      singername: singers.length ? singers.map(s => s.name).join(' / ') : artist,
+      album_name: (item.albuminfo && item.albuminfo.name) || '',
+      album_img: item.cover || '',
       timelength: item.timelen || item.duration,
       extname: item.extname,
     });
