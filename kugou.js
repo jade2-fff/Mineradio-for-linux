@@ -667,17 +667,20 @@ function createKugouProvider(deps) {
 
   function mapPlaylist(pl) {
     pl = pl || {};
-    const id = pl.global_collection_id || pl.global_collectionid || pl.collection_id || pl.specialid || pl.specialidstr || pl.id || pl.listid;
+    const id = pl.global_collection_id || pl.global_collectionid || pl.collection_id || pl.list_create_gid || pl.specialid || pl.specialidstr || pl.id || pl.listid;
+    // gateway 私有歌单（get_all_list）字段名与公开 special 接口不同：
+    // 封面为 pic（含 {size} 占位符），歌曲数为 m_count，创建者为 list_create_username。
+    const rawCover = pl.pic || pl.img || pl.picurl || pl.imgurl || pl.cover || pl.create_user_pic || '';
     return {
       provider: 'kugou',
       source: 'kugou',
       type: 'playlist',
       id: id ? String(id) : '',
       name: pl.specialname || pl.name || pl.title || '',
-      cover: pl.img || pl.picurl || pl.imgurl || pl.cover || '',
-      trackCount: pl.songcount || pl.song_count || pl.total || 0,
+      cover: rawCover ? normalizeKugouImageUrl(rawCover, 240) : '',
+      trackCount: Number(pl.songcount || pl.song_count || pl.total || pl.m_count || pl.count || 0) || 0,
       playCount: pl.playcount || pl.play_count || 0,
-      creator: pl.nickname || pl.username || (pl.user && pl.user.username) || '酷狗音乐',
+      creator: pl.nickname || pl.username || pl.list_create_username || (pl.user && pl.user.username) || '酷狗音乐',
       subscribed: !!(pl.iscollect || pl.collect),
       specialType: Number(pl.specialtype || 0) || 0,
     };
