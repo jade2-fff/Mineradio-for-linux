@@ -52,7 +52,9 @@ chmod +x Mineradio-1.1.1-x86_64.AppImage
 
 > 如果双击无法运行，可能是文件管理器未启用「允许执行」，在文件属性里勾选「作为程序执行」即可。
 
-### 方式二：deb 包（系统安装，适合 Debian/Ubuntu 系）
+### 方式二：deb 包（系统安装，仅适合 Debian / Ubuntu 系）
+
+> ⚠️ deb 包的依赖名（`libgtk-3-0`、`libnss3` 等）是 Debian/Ubuntu 的包名。**不要把 deb 转成 `pkg.tar.zst` 在 Arch 上安装**——包名对不上会一直提示依赖缺失。Arch / Manjaro 用户请直接用上面的 AppImage。
 
 ```bash
 # 安装
@@ -77,6 +79,32 @@ sudo apt install libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
 ```
 
 > AppImage 用户通常无需手动安装，AppImage 会自带大部分依赖。
+
+### Arch / Manjaro 用户
+
+**推荐直接使用 AppImage**（自带依赖、免安装、免转换）。不要把 deb 转成 `pkg.tar.zst`，那样依赖名对不上会一直报缺依赖。
+
+若 AppImage 提示缺运行库，按 Arch 的包名安装即可（Debian → Arch 对照）：
+
+| Debian/Ubuntu 包名 | Arch/Manjaro 包名 |
+| --- | --- |
+| `libgtk-3-0` | `gtk3` |
+| `libnotify4` | `libnotify` |
+| `libnss3` | `nss` |
+| `libxss1` | `libxss` |
+| `libxtst6` | `libxtst` |
+| `libatspi2.0-0` | `at-spi2-core` |
+| `libdrm2` | `libdrm` |
+| `libgbm1` | `mesa`（含 `libgbm`） |
+| `xdg-utils` | `xdg-utils` |
+
+```bash
+sudo pacman -S --needed gtk3 libnotify nss libxss libxtst at-spi2-core libdrm mesa xdg-utils
+```
+
+> Hyprland 等 Wayland 平铺环境：Mineradio 现已支持系统托盘常驻——关闭窗口会最小化到托盘后台（音乐继续播放），点托盘图标即可唤回主界面，右键托盘有播放控制和退出。托盘图标需要桌面环境支持 StatusNotifier（waybar / 大多数状态栏都支持）。
+
+> 启动时若在终端看到 `'--ozone-platform=wayland' is not compatible with Vulkan` 一行，这是 Chromium 在 Wayland 下的无害提示，不影响运行，可忽略（强行消除它反而会让 GPU 进程在部分显卡上崩溃黑屏）。
 
 ### 常见问题：双击没反应 / 启动秒退
 

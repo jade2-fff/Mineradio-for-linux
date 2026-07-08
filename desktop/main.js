@@ -12,13 +12,15 @@ function applySystemSpeechGuard() {
 
 applySystemSpeechGuard();
 
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, Tray, Menu, nativeImage } = require('electron');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
 let localServer = null;
 let mainServerPort = 0;
 let desktopLyricsWindow = null;
@@ -58,7 +60,6 @@ const KUGOU_LOGIN_URL = 'https://www.kugou.com/';
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],
-  ['ignore-gpu-blocklist'],
   ['enable-gpu-rasterization'],
   ['enable-oop-rasterization'],
   ['enable-zero-copy'],
@@ -77,6 +78,10 @@ const CHROMIUM_PERFORMANCE_SWITCHES = [
 //     MINERADIO_ANGLE=gl|gles|vulkan|swiftshader  强制指定 ANGLE 后端
 //     MINERADIO_GPU=off                            退到软件渲染（SwiftShader）
 if (process.platform === 'win32') {
+  // ignore-gpu-blocklist 会无视显卡黑名单强制启用硬件加速；Windows 上稳定，
+  // 但在 Linux（尤其 Wayland/Hyprland）上会触发 VA-API 硬解初始化失败
+  // （vaInitialize failed: unknown libva error），所以只在 Windows 追加。
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['ignore-gpu-blocklist']);
   CHROMIUM_PERFORMANCE_SWITCHES.push(['use-angle', 'd3d11']);
 } else if (String(process.env.MINERADIO_GPU || '').toLowerCase() === 'off') {
   CHROMIUM_PERFORMANCE_SWITCHES.push(['use-gl', 'angle']);
@@ -98,9 +103,17 @@ try { app.setAccessibilitySupportEnabled(false); } catch (e) {}
 // Linux 下让 Electron/X11 应用在不同会话（X11 / Wayland）下都能正常合成透明窗口。
 // 当会话是 Wayland 时用 wayland 后端，否则回落到默认 X11。
 if (process.platform === 'linux') {
-  if (process.env.XDG_SESSION_TYPE === 'wayland' || !!(process.env.WAYLAND_DISPLAY)) {
+  const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!(process.env.WAYLAND_DISPLAY);
+  if (isWayland) {
     app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
     app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform,WaylandWindowDecorations');
+    // 关掉 VA-API 硬件视频解码探测，消除 Wayland/Hyprland 下的
+    // "vaInitialize failed: unknown libva error"（音乐播放器用不到硬解，关掉无副作用）。
+    app.commandLine.appendSwitch('disable-accelerated-video-decode');
+    // 注意：不强制 use-gl / use-angle 后端。剩下那条
+    // "'--ozone-platform=wayland' is not compatible with Vulkan" 只是无害告警，
+    // 强行改 GL 后端反而会在只允许 ANGLE 的系统上让 GPU 进程崩溃（黑屏）。
+    // 如遇真实渲染异常，用 MINERADIO_GPU=off 或 MINERADIO_ANGLE=... 覆盖。
   }
 }
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -354,6 +367,63 @@ function focusMainWindow() {
   mainWindow.focus();
   sendWindowState(mainWindow);
   return true;
+}
+
+function toggleMainWindowVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+    mainWindow.hide();
+  } else {
+    focusMainWindow();
+  }
+}
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    { label: '显示 Mineradio', click: () => focusMainWindow() },
+    { type: 'separator' },
+    { label: '播放 / 暂停', click: () => sendGlobalHotkeyAction('togglePlay') },
+    { label: '上一首', click: () => sendGlobalHotkeyAction('prevTrack') },
+    { label: '下一首', click: () => sendGlobalHotkeyAction('nextTrack') },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+}
+
+// 创建系统托盘。返回是否成功——部分 Linux 环境（缺少 StatusNotifier 支持）会失败，
+// 此时调用方应回退到「关窗即退出」，避免用户彻底找不回窗口。
+function createTray() {
+  if (tray) return true;
+  try {
+    let image = nativeImage.createFromPath(APP_ICON_ICO);
+    if (image.isEmpty()) return false;
+    // Linux/macOS 托盘图标偏小，缩一下避免显示过大。
+    if (process.platform !== 'win32') {
+      image = image.resize({ width: 22, height: 22 });
+    }
+    tray = new Tray(image);
+    tray.setToolTip(APP_NAME);
+    tray.setContextMenu(buildTrayMenu());
+    // 左键点击切换主窗口显示/隐藏（Windows/大多数 Linux 托盘支持 click 事件）。
+    tray.on('click', () => toggleMainWindowVisibility());
+    return true;
+  } catch (e) {
+    console.warn('Tray creation failed:', e && e.message || e);
+    tray = null;
+    return false;
+  }
+}
+
+function destroyTray() {
+  if (!tray) return;
+  try { tray.destroy(); } catch (e) {}
+  tray = null;
 }
 
 function getUpdateDownloadDir() {
@@ -1624,6 +1694,14 @@ async function createWindow() {
   mainWindow.on('blur', () => sendWindowState(mainWindow));
   mainWindow.on('move', () => scheduleWindowStateSend(mainWindow));
   mainWindow.on('resize', () => scheduleWindowStateSend(mainWindow));
+  // 有托盘时，点关闭不退出而是藏到托盘后台驻留（音乐可继续播放）。
+  // 托盘创建失败时 tray 为 null，此处不拦截，保持原来的关窗即退出，避免用户找不回窗口。
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
   mainWindow.on('closed', () => {
     if (mainWindowStateTimer) {
       clearTimeout(mainWindowStateTimer);
@@ -1666,6 +1744,7 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     installLinuxMediaPermissionHandler();
+    createTray();
     screen.on('display-metrics-changed', () => {
       positionDesktopLyricsWindow();
       positionWallpaperWindow();
@@ -1682,11 +1761,15 @@ if (!gotSingleInstanceLock) {
   });
 
   app.on('window-all-closed', () => {
+    // 有托盘时保持后台驻留（不退出）；macOS 遵循平台惯例常驻；其余情况正常退出。
+    if (tray && !isQuitting) return;
     if (process.platform !== 'darwin') app.quit();
   });
 
   app.on('before-quit', () => {
+    isQuitting = true;
     unregisterMineradioGlobalHotkeys();
+    destroyTray();
     closeOverlayWindows();
     if (localServer && localServer.close) localServer.close();
   });
