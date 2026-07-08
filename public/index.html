@@ -2846,6 +2846,7 @@ var weatherRadioStartBusy = false;
 var activeRadioContext = null;
 var listenStatsState = loadListenStatsState();
 var listenSession = null;
+var finalizingListenSession = false;
 var appPerfMarks = [];
 function markAppPerf(name) {
   try {
@@ -8921,6 +8922,12 @@ function buildLyricMesh(text) {
   group.userData.state = 'in';
   group.userData.lastLyricProgress = -1;
   group.userData.floatSeed = Math.random() * 100;
+  // 随机方向入场: 每句从一个随机方向飞入 (角度随机, 距离固定), 随入场进度衰减到 0
+  var entryAng = Math.random() * Math.PI * 2;
+  var entryDist = 1.6 + Math.random() * 1.2;
+  group.userData.entryX = Math.cos(entryAng) * entryDist;
+  group.userData.entryY = Math.sin(entryAng) * entryDist;
+  group.userData.entryRot = (Math.random() - 0.5) * 0.5;
 
   var sunMat = new THREE.MeshBasicMaterial({
     map:getLyricSunBloomTexture(), transparent:true, opacity:0,
@@ -9317,10 +9324,15 @@ function updateStageLyrics3D(dt) {
         mesh.rotation.z = Math.sin(t * 0.30 + seed) * 0.010;
       } else {
         mesh.userData.skullMouthMeshLocked = false;
+        // 随机方向入场偏移: 入场时从随机方向飞入, 随 a→1 衰减消失 (ease-out)
+        var entryK = (1 - a) * (1 - a);
+        var entryX = (mesh.userData.entryX || 0) * entryK;
+        var entryY = (mesh.userData.entryY || 0) * entryK;
         mesh.scale.setScalar(0.96 + a * 0.055 + breathe + bass * 0.038 + beatPulse * 0.014);
-        mesh.position.y += ((0.18 + Math.sin(t * 0.55 + seed) * 0.055 + Math.sin(t * 1.35 + seed) * 0.014) - mesh.position.y) * 0.075;
+        mesh.position.x += ((entryX) - mesh.position.x) * 0.14;
+        mesh.position.y += ((0.18 + entryY + Math.sin(t * 0.55 + seed) * 0.055 + Math.sin(t * 1.35 + seed) * 0.014) - mesh.position.y) * 0.075;
         mesh.position.z += ((1.48 + Math.cos(t * 0.48 + seed) * 0.080) - mesh.position.z) * 0.080;
-        mesh.rotation.z = Math.sin(t * 0.34 + seed) * 0.018;
+        mesh.rotation.z = Math.sin(t * 0.34 + seed) * 0.018 + (mesh.userData.entryRot || 0) * entryK;
       }
       if (data.sparks && data.sparkMat) data.sparks.visible = fx.lyricGlowParticles || getLyricSparkOpacity(data) > 0.015;
       if (data.sparks && data.basePositions) {
@@ -15485,10 +15497,13 @@ function beginListenSession(song, context) {
 }
 function updateListenStatsTick(force) {
   if (!audio || !audio.duration || audio.paused) return;
-  var song = currentCoverSong();
-  if (!song) return;
-  var key = queueItemKey(song);
-  if (!listenSession || listenSession.key !== key) beginListenSession(song, activeRadioContext);
+  // finalize 过程中禁止自动新建/切换 session, 否则会与 finalizeListenSession 互相递归调用 (爆栈)
+  if (!finalizingListenSession) {
+    var song = currentCoverSong();
+    if (!song) return;
+    var key = queueItemKey(song);
+    if (!listenSession || listenSession.key !== key) beginListenSession(song, activeRadioContext);
+  }
   if (!listenSession) return;
   var now = Date.now();
   var audioTime = isFinite(audio.currentTime) ? audio.currentTime : 0;
@@ -15502,8 +15517,10 @@ function updateListenStatsTick(force) {
   listenSession.maxProgress = Math.max(listenSession.maxProgress || 0, audio.duration ? audioTime / audio.duration : 0);
 }
 function finalizeListenSession(completed) {
-  if (!listenSession) return;
+  if (!listenSession || finalizingListenSession) return;
+  finalizingListenSession = true;
   updateListenStatsTick(true);
+  finalizingListenSession = false;
   var session = listenSession;
   listenSession = null;
   var effective = completed || session.listenMs >= 45000 || session.maxProgress >= 0.5 || (!audio || !audio.duration ? session.listenMs >= 30000 : false);
@@ -26515,7 +26532,7 @@ function normalizeDesktopLyricText(text) {
 function currentDesktopLyricSnapshot() {
   var t = audio && isFinite(audio.currentTime) ? Number(audio.currentTime) : 0;
   var lines = Array.isArray(lyricsLines) ? lyricsLines : [];
-  if (playing && audio && lines.length) {
+  if (audio && lines.length) {
     var idx = -1;
     for (var i = 0; i < lines.length; i++) {
       if (lines[i].t <= t + 0.05) idx = i;
@@ -26526,10 +26543,20 @@ function currentDesktopLyricSnapshot() {
       var nextLine = lines[idx + 1];
       var nextT = nextLine && nextLine.t > curLine.t ? nextLine.t : Math.min((audio && audio.duration) || t + 4, curLine.t + (curLine.duration || 4.8));
       var span = Math.max(0.75, nextT - curLine.t);
+      // 多行滚动: 当前行前后各取 2 行 (共 5 行), active=true 的为当前行
+      var context = [];
+      for (var ci = idx - 2; ci <= idx + 2; ci++) {
+        if (ci < 0 || ci >= lines.length) continue;
+        var cl = lines[ci];
+        var clText = normalizeDesktopLyricText(cl.text || (ci === idx ? currentLyricFallbackText() : ''));
+        if (!clText) continue;
+        context.push({ text: clText, active: ci === idx, offset: ci - idx });
+      }
       return {
         text: normalizeDesktopLyricText(curLine.text || currentLyricFallbackText()),
         progress: getLyricLineProgress(curLine, nextLine, t),
-        progressSpan: span
+        progressSpan: span,
+        lines: context
       };
     }
     var introText = normalizeDesktopLyricText(currentLyricFallbackText());
@@ -26632,6 +26659,7 @@ function desktopLyricsPayload(forceBeatMap) {
     text: lyric.text,
     progress: lyric.progress,
     progressSpan: lyric.progressSpan,
+    lines: Array.isArray(lyric.lines) ? lyric.lines : null,
     title: meta.title,
     artist: meta.artist,
     playing: !!playing,

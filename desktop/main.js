@@ -1,3 +1,17 @@
+function applySystemSpeechGuard() {
+  if (process.platform !== 'linux') return;
+  process.env.NO_AT_BRIDGE = '1';
+  for (const name of ['GTK_MODULES', 'GTK2_MODULES']) {
+    const value = process.env[name];
+    if (!value) continue;
+    const modules = value.split(':').filter((item) => item && !/^(atk-bridge|gail)$/i.test(item));
+    if (modules.length) process.env[name] = modules.join(':');
+    else delete process.env[name];
+  }
+}
+
+applySystemSpeechGuard();
+
 const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog } = require('electron');
 const net = require('net');
 const path = require('path');
@@ -39,6 +53,8 @@ const NETEASE_LOGIN_PARTITION = 'persist:mineradio-netease-login';
 const NETEASE_LOGIN_URL = 'https://music.163.com/#/login';
 const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
 const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
+const KUGOU_LOGIN_PARTITION = 'persist:mineradio-kugou-login';
+const KUGOU_LOGIN_URL = 'https://www.kugou.com/';
 
 const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['autoplay-policy', 'no-user-gesture-required'],
@@ -51,13 +67,33 @@ const CHROMIUM_PERFORMANCE_SWITCHES = [
   ['disable-renderer-backgrounding'],
   ['disable-backgrounding-occluded-windows'],
   ['force_high_performance_gpu'],
-  // Angle 后端按平台选择：Windows 用 d3d11，Linux 优先 OpenGL（兼容性最稳）。
-  ['use-angle', process.platform === 'win32' ? 'd3d11' : 'gl'],
 ];
+// GL/ANGLE 后端选择：
+//   Windows 走 ANGLE d3d11（稳定）。
+//   Linux 默认不强制任何 GL/ANGLE 后端，交给 Electron 自己选（与系统内其它正常运行的
+//   Electron 应用一致）；强制 ANGLE 的 gl/gles/vulkan 在部分新 NVIDIA 卡上会在 EGL
+//   初始化阶段失败（No suitable EGL configs / NVIDIA GLES not supported）导致黑屏卡死。
+//   如需排障可用环境变量覆盖：
+//     MINERADIO_ANGLE=gl|gles|vulkan|swiftshader  强制指定 ANGLE 后端
+//     MINERADIO_GPU=off                            退到软件渲染（SwiftShader）
+if (process.platform === 'win32') {
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-angle', 'd3d11']);
+} else if (String(process.env.MINERADIO_GPU || '').toLowerCase() === 'off') {
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-gl', 'angle']);
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-angle', 'swiftshader']);
+} else if (process.env.MINERADIO_ANGLE) {
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-gl', 'angle']);
+  CHROMIUM_PERFORMANCE_SWITCHES.push(['use-angle', process.env.MINERADIO_ANGLE]);
+}
+// else: Linux 默认不追加 use-gl/use-angle，使用 Electron 默认后端。
 for (const [name, value] of CHROMIUM_PERFORMANCE_SWITCHES) {
   if (value == null) app.commandLine.appendSwitch(name);
   else app.commandLine.appendSwitch(name, value);
 }
+app.commandLine.appendSwitch('disable-renderer-accessibility');
+app.commandLine.appendSwitch('force-renderer-accessibility', 'false');
+app.commandLine.appendSwitch('disable-speech-api');
+try { app.setAccessibilitySupportEnabled(false); } catch (e) {}
 
 // Linux 下让 Electron/X11 应用在不同会话（X11 / Wayland）下都能正常合成透明窗口。
 // 当会话是 Wayland 时用 wayland 后端，否则回落到默认 X11。
@@ -101,6 +137,20 @@ const NETEASE_LOGIN_COOKIE_PRIORITY = [
   'WEVNSM',
   'WNMCID',
   'JSESSIONID-WYYY',
+];
+const KUGOU_LOGIN_COOKIE_PRIORITY = [
+  'userid',
+  'kugou_userid',
+  'KUGOO_ID',
+  'dfid',
+  'kugou_dfid',
+  'mid',
+  'kugou_mid',
+  'token',
+  'kg_mid',
+  'kg_dfid',
+  'kguserid',
+  'KuGoo',
 ];
 
 function findOpenPort(startPort) {
@@ -387,6 +437,19 @@ function neteaseCookieHasLogin(cookieText) {
   return !!obj.MUSIC_U;
 }
 
+function kugouCookieHasLogin(cookieText) {
+  const obj = parseCookieHeader(cookieText);
+  const uid = obj.userid || obj.kugou_userid || obj.KUGOO_ID || obj.kguserid || '';
+  // 酷狗网页登录经常只在扫码后先落 userid，再由页面继续补 dfid/mid；这里先接受 uid，后端会继续校验。
+  return !!uid;
+}
+
+function isKugouCookieDomain(domain) {
+  const normalized = String(domain || '').replace(/^\./, '').toLowerCase();
+  return normalized === 'kugou.com' || normalized.endsWith('.kugou.com') ||
+    normalized === 'kgmusic.com' || normalized.endsWith('.kgmusic.com');
+}
+
 function isQQCookieDomain(domain) {
   const normalized = String(domain || '').replace(/^\./, '').toLowerCase();
   return normalized === 'qq.com' || normalized.endsWith('.qq.com') || normalized.endsWith('qqmusic.qq.com');
@@ -433,6 +496,11 @@ async function readQQLoginCookieHeader(cookieSession) {
 async function readNeteaseLoginCookieHeader(cookieSession) {
   const cookies = await cookieSession.cookies.get({});
   return buildCookieHeaderFor(cookies, isNeteaseCookieDomain, NETEASE_LOGIN_COOKIE_PRIORITY);
+}
+
+async function readKugouLoginCookieHeader(cookieSession) {
+  const cookies = await cookieSession.cookies.get({});
+  return buildCookieHeaderFor(cookies, isKugouCookieDomain, KUGOU_LOGIN_COOKIE_PRIORITY);
 }
 
 async function openNeteaseMusicLoginWindow(owner) {
@@ -646,6 +714,104 @@ async function clearQQMusicLoginSession() {
   return { ok: true };
 }
 
+async function openKugouMusicLoginWindow(owner) {
+  const cookieSession = session.fromPartition(KUGOU_LOGIN_PARTITION);
+  const initialCookie = await readKugouLoginCookieHeader(cookieSession);
+  if (kugouCookieHasLogin(initialCookie)) return { ok: true, cookie: initialCookie, reused: true };
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let pollTimer = null;
+
+    const loginWindow = new BrowserWindow({
+      width: 900,
+      height: 720,
+      minWidth: 760,
+      minHeight: 560,
+      parent: owner && !owner.isDestroyed() ? owner : undefined,
+      modal: false,
+      show: false,
+      autoHideMenuBar: true,
+      title: '酷狗音乐登录',
+      backgroundColor: '#111111',
+      icon: APP_ICON_ICO,
+      webPreferences: {
+        partition: KUGOU_LOGIN_PARTITION,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+    const finish = async (result) => {
+      if (settled) return;
+      settled = true;
+      if (pollTimer) clearInterval(pollTimer);
+      if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
+      resolve(result);
+    };
+
+    const checkCookies = async () => {
+      try {
+        const cookie = await readKugouLoginCookieHeader(cookieSession);
+        if (kugouCookieHasLogin(cookie)) finish({ ok: true, cookie });
+      } catch (e) {
+        console.warn('Kugou login cookie check failed:', e.message);
+      }
+    };
+
+    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) {
+        loginWindow.loadURL(url).catch((e) => console.warn('Kugou login popup navigation failed:', e.message));
+      } else {
+        shell.openExternal(url).catch(() => {});
+      }
+      return { action: 'deny' };
+    });
+
+    loginWindow.webContents.on('did-finish-load', () => {
+      checkCookies();
+      loginWindow.webContents.executeJavaScript(`
+        setTimeout(() => {
+          const nodes = Array.from(document.querySelectorAll('a, button, span, div'));
+          const loginNode = nodes.find((node) => {
+            const text = (node.textContent || '').trim();
+            if (!/登录|登陆/.test(text)) return false;
+            const rect = node.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          });
+          if (loginNode) loginNode.click();
+        }, 700);
+      `, true).catch(() => {});
+    });
+
+    loginWindow.on('ready-to-show', () => loginWindow.show());
+    loginWindow.on('closed', async () => {
+      if (settled) return;
+      if (pollTimer) clearInterval(pollTimer);
+      try {
+        const cookie = await readKugouLoginCookieHeader(cookieSession);
+        resolve(kugouCookieHasLogin(cookie)
+          ? { ok: true, cookie }
+          : { ok: false, cancelled: true, message: '酷狗登录窗口已关闭' });
+      } catch (e) {
+        resolve({ ok: false, error: e.message || '酷狗登录窗口已关闭' });
+      }
+    });
+
+    pollTimer = setInterval(checkCookies, 1200);
+    loginWindow.loadURL(KUGOU_LOGIN_URL).catch((e) => finish({ ok: false, error: e.message }));
+  });
+}
+
+async function clearKugouMusicLoginSession() {
+  const cookieSession = session.fromPartition(KUGOU_LOGIN_PARTITION);
+  await cookieSession.clearStorageData({
+    storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
+  });
+  return { ok: true };
+}
+
 async function clearNeteaseMusicLoginSession() {
   const cookieSession = session.fromPartition(NETEASE_LOGIN_PARTITION);
   await cookieSession.clearStorageData({
@@ -806,7 +972,10 @@ function rememberDesktopLyricsBounds() {
 function applyDesktopLyricsMouseBehavior() {
   if (!desktopLyricsWindow || desktopLyricsWindow.isDestroyed()) return;
   const locked = desktopLyricsState.clickThrough !== false;
-  const shouldIgnore = locked || !desktopLyricsPointerCapture;
+  // 解锁时窗口始终可交互 (不吞鼠标), 直接就能拖 —— 否则在没有中键轮询的平台(Linux)会陷入
+  // "鼠标被忽略→收不到 hover→pointerCapture 永远开不起来" 的死锁, 导致根本拖不动。
+  // 锁定时才穿透(防误触), 但仍靠 forward 让 hover 提示能出现。
+  const shouldIgnore = locked ? !desktopLyricsPointerCapture : false;
   if (desktopLyricsMouseIgnored === shouldIgnore) return;
   desktopLyricsMouseIgnored = shouldIgnore;
   desktopLyricsWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });
@@ -1212,6 +1381,14 @@ ipcMain.handle('qq-music-open-login', async (event) => {
 
 ipcMain.handle('qq-music-clear-login', async () => {
   return clearQQMusicLoginSession();
+});
+
+ipcMain.handle('kugou-music-open-login', async (event) => {
+  return openKugouMusicLoginWindow(getSenderWindow(event));
+});
+
+ipcMain.handle('kugou-music-clear-login', async () => {
+  return clearKugouMusicLoginSession();
 });
 
 ipcMain.handle('mineradio-open-update-installer', async (_event, filePath) => {

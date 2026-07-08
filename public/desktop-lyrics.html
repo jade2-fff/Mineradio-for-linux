@@ -70,7 +70,8 @@
       transform:translateZ(0);
       will-change:transform,filter;
     }
-    body.unlocked .stage.hint-visible .lyric-viewport{pointer-events:auto;cursor:move;-webkit-app-region:no-drag}
+    body.unlocked .stage .lyric-viewport{pointer-events:auto;cursor:move;-webkit-app-region:no-drag}
+    body.unlocked .lyric-context{pointer-events:auto;cursor:move}
     .lyric-scroll{
       display:inline-block;
       transform:translate3d(var(--lyric-scroll-x),0,0) scaleX(var(--lyric-fit-x));
@@ -121,6 +122,32 @@
     }
     .line.in{animation:lyr-in 820ms cubic-bezier(.16,.84,.32,1.02) forwards}
     body.paused .line{filter:none;opacity:.84}
+    /* 多行滚动上下文行 (当前行仍由 #line 渲染, 这里只画上下预览/回顾) */
+    .lyric-context{
+      position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;
+      width:min(100%,1120px);max-width:calc(100vw - 24px);margin:0 auto;
+      pointer-events:none;text-align:center;gap:.24em;
+    }
+    .lyric-context-above{justify-content:flex-end;padding-bottom:.18em;
+      -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 90%);mask-image:linear-gradient(to bottom,transparent 0,#000 90%)}
+    .lyric-context-below{justify-content:flex-start;padding-top:.18em;
+      -webkit-mask-image:linear-gradient(to top,transparent 0,#000 90%);mask-image:linear-gradient(to top,transparent 0,#000 90%)}
+    .lyric-context .ctx-line{
+      font-family:var(--lyric-font);font-weight:600;
+      color:var(--lyric-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+      text-shadow:0 1px 2px rgba(4,6,12,.5);transition:opacity .4s ease,transform .4s ease;
+      transform:translateX(var(--restX,0));backface-visibility:hidden;
+    }
+    /* 距当前行越远越小越淡 */
+    .lyric-context .ctx-line.d1{font-size:calc(var(--lyric-size) * .58);opacity:.60}
+    .lyric-context .ctx-line.d2{font-size:calc(var(--lyric-size) * .48);opacity:.34}
+    body.paused .lyric-context .ctx-line{opacity:.4}
+    /* 随机方向入场: 每句从随机方向飞入, 归位到各自散布位置(restX) */
+    .ctx-line.fly-in,#line.fly-in{animation:dl-fly-in .72s cubic-bezier(.18,.86,.3,1) both}
+    @keyframes dl-fly-in{
+      0%{transform:translate(calc(var(--restX,0px) + var(--fx,0px)),var(--fy,0))  scale(.82) rotate(var(--fr,0deg));opacity:0;filter:blur(3px)}
+      100%{transform:translate(var(--restX,0),0) scale(1) rotate(0deg);opacity:var(--dl-op,1);filter:blur(0)}
+    }
     .lock-hint{
       position:absolute;
       z-index:4;
@@ -187,7 +214,9 @@
   <canvas id="fx"></canvas>
   <div class="wrap">
     <div id="stage" class="stage">
+      <div id="contextAbove" class="lyric-context lyric-context-above"></div>
       <div id="lyricViewport" class="lyric-viewport"><div id="lyricScroller" class="lyric-scroll"><div id="line" class="line" data-text="Mineradio">Mineradio</div></div></div>
+      <div id="contextBelow" class="lyric-context lyric-context-below"></div>
       <div id="lockHint" class="lock-hint"><span class="lock-icon"></span><span id="lockText">&#20013;&#38190;&#35299;&#38145;</span><button id="closeLyricsBtn" class="lyrics-close" type="button" aria-label="Close desktop lyrics">&#20851;&#38381;&#26700;&#38754;&#27468;&#35789;</button></div>
     </div>
   </div>
@@ -681,9 +710,9 @@
       setRootVar('--lyric-scroll-x', scrollState.offset.toFixed(2) + 'px');
     }
     function replayLineAnimation() {
+      // 当前行也从随机方向飞入 (与上下文行一致的入场风格)
       line.classList.remove('in');
-      void line.offsetWidth;
-      line.classList.add('in');
+      applyFlyIn(line, 1);
     }
     function syncLockClasses() {
       var locked = isLocked();
@@ -782,7 +811,50 @@
         layoutKey = '';
         replayLineAnimation();
       }
+      renderContextLines(state.lines);
       fitLyricText(false);
+    }
+    // 多行上下文: 当前行仍由 #line 渲染, 这里画上下预览/回顾行
+    var ctxAbove = document.getElementById('contextAbove');
+    var ctxBelow = document.getElementById('contextBelow');
+    var lastCtxKey = '';
+    function renderContextLines(lines) {
+      if (!ctxAbove || !ctxBelow) return;
+      if (!Array.isArray(lines) || !lines.length) {
+        // 无多行数据 → 回退单行 (清空上下文)
+        if (lastCtxKey !== '') { ctxAbove.textContent = ''; ctxBelow.textContent = ''; lastCtxKey = ''; }
+        return;
+      }
+      var key = lines.map(function(l){ return (l.offset) + ':' + l.text; }).join('|');
+      if (key === lastCtxKey) return;
+      lastCtxKey = key;
+      ctxAbove.textContent = '';
+      ctxBelow.textContent = '';
+      lines.forEach(function(l){
+        if (l.active) return; // 当前行由 #line 负责
+        var el = document.createElement('div');
+        el.className = 'ctx-line d' + Math.min(2, Math.abs(l.offset || 1));
+        el.textContent = l.text;
+        // 水平散布: 按 offset 交替左右 + 随机量, 让上下文行错落不成一条直线
+        var off = l.offset || 0;
+        var side = (off % 2 === 0) ? 1 : -1;              // 交替左右
+        var shift = side * (7 + Math.random() * 16);      // vw: 7~23
+        el.style.setProperty('--restX', shift.toFixed(1) + 'vw');
+        // 随机方向入场
+        applyFlyIn(el, Math.abs(off) === 1 ? 0.60 : 0.34);
+        if (off < 0) ctxAbove.appendChild(el);
+        else ctxBelow.appendChild(el);
+      });
+    }
+    // 给元素设一个随机飞入方向并触发入场动画
+    function applyFlyIn(el, opacity){
+      var ang = Math.random() * Math.PI * 2;
+      var dist = 40 + Math.random() * 90;   // px
+      el.style.setProperty('--fx', (Math.cos(ang)*dist).toFixed(0) + 'px');
+      el.style.setProperty('--fy', (Math.sin(ang)*dist).toFixed(0) + 'px');
+      el.style.setProperty('--fr', ((Math.random()-0.5)*16).toFixed(1) + 'deg');
+      el.style.setProperty('--dl-op', String(opacity == null ? 1 : opacity));
+      el.classList.remove('fly-in'); void el.offsetWidth; el.classList.add('fly-in');
     }
     function currentDisplayProgress() {
       var target = clamp(state.progress, 0, 1, 0);

@@ -75,14 +75,14 @@
       if (_hudCb) {
         var label = SM.getStateName();
         var prog = 0, detail = '';
-        if (curSt === SM.ST.PINCH) { prog = 1; detail = '左/右挥 = 切歌 · 松开 = 播放/暂停'; }
+        if (curSt === SM.ST.PINCH) { prog = 1; detail = '上/下划 = 切歌 · 松开 = 播放/暂停'; }
         else if (curSt === SM.ST.FIST) { prog = 0.7; detail = '聚焦歌单架'; }
         else if (curSt === SM.ST.HOVER && f.openness > 0.62) { prog = 0.4; detail = '横向移动 = 旋转歌单架'; }
-        else { prog = 0; detail = '五指收拢 = 切歌 · 握拳 = 聚焦'; }
+        else { prog = 0; detail = '五指收拢后上/下划 = 切歌 · 握拳 = 聚焦'; }
         _hudCb(label, prog, detail);
       }
     }).then(function () {
-      if (_toastCb) _toastCb('手势已开启: 五指收拢切歌 · 握拳聚焦');
+      if (_toastCb) _toastCb('手势已开启: 五指收拢后上/下划切歌 · 握拳聚焦');
       if (_hudCb) _hudCb('待命', 0, '把手放进视野');
     }).catch(function (e) {
       _active = false;
