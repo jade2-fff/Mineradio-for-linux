@@ -309,6 +309,24 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-kicker{grid-column:1;font-size:10px;font-weight:780;letter-spacing:.18em;color:color-mix(in srgb,var(--home-accent) 62%,rgba(255,255,255,.36));text-transform:uppercase;margin-bottom:14px}
 .home-title{grid-column:1;font-size:clamp(34px,4.6vw,58px);line-height:.98;font-weight:760;letter-spacing:0;color:rgba(255,255,255,.98);max-width:380px;text-shadow:0 10px 36px rgba(0,0,0,.26)}
 .home-title.home-construction-title{max-width:620px;font-size:clamp(32px,4.5vw,64px);line-height:1.08}
+.home-hero-inner.home-comment-inner{display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:16px;padding:4px 2px;min-height:100%}
+.home-hot-comment{position:relative;min-height:150px;display:flex;flex-direction:column;gap:14px}
+.home-hot-comment .hhc-head{display:flex;align-items:center;gap:12px}
+.home-hot-comment .hhc-cover{width:58px;height:58px;border-radius:14px;flex:0 0 auto;object-fit:cover;background:rgba(255,255,255,.06);box-shadow:0 10px 26px rgba(0,0,0,.32),inset 0 0 0 1px rgba(255,255,255,.08)}
+.home-hot-comment .hhc-song{min-width:0;display:flex;flex-direction:column;gap:4px}
+.home-hot-comment .hhc-song-name{font-size:17px;font-weight:740;color:rgba(255,255,255,.98);line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.home-hot-comment .hhc-song-meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:rgba(255,255,255,.58)}
+.home-hot-comment .hhc-tag{height:19px;padding:0 8px;border-radius:999px;display:inline-flex;align-items:center;font-size:10px;font-weight:720;letter-spacing:.04em;border:1px solid color-mix(in srgb,var(--home-accent) 34%,rgba(255,255,255,.12));background:color-mix(in srgb,var(--home-accent) 12%,rgba(255,255,255,.04));color:#fff}
+.home-hot-comment .hhc-quote{position:relative;flex:1 1 auto;display:flex;gap:11px;padding:14px 16px;border-radius:16px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(140deg,rgba(255,255,255,.055),rgba(255,255,255,.018));overflow:hidden}
+.home-hot-comment .hhc-quote::before{content:'\201C';position:absolute;top:2px;left:10px;font-size:42px;line-height:1;color:color-mix(in srgb,var(--home-accent) 44%,rgba(255,255,255,.14));font-family:Georgia,serif;pointer-events:none}
+.home-hot-comment .hhc-avatar{width:34px;height:34px;border-radius:50%;flex:0 0 auto;object-fit:cover;background:rgba(255,255,255,.08)}
+.home-hot-comment .hhc-body{min-width:0;display:flex;flex-direction:column;gap:5px;z-index:1}
+.home-hot-comment .hhc-user{display:flex;align-items:center;gap:8px;font-size:11.5px;color:rgba(255,255,255,.64)}
+.home-hot-comment .hhc-like{color:color-mix(in srgb,var(--home-accent) 68%,#fff)}
+.home-hot-comment .hhc-text{font-size:13.5px;line-height:1.6;color:rgba(255,255,255,.90);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.home-hot-comment .hhc-state{display:flex;align-items:center;min-height:150px;font-size:13px;line-height:1.6;color:rgba(255,255,255,.56);max-width:400px}
+.home-comment-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.home-comment-refresh{height:36px}
 .home-sub{grid-column:1;margin-top:14px;font-size:13px;line-height:1.62;color:rgba(255,255,255,.62);max-width:348px}
 .home-weather-meta{grid-column:1;display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 .home-weather-pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.050);display:inline-flex;align-items:center;color:rgba(255,255,255,.70);font-size:11px;font-weight:680}
@@ -1994,9 +2012,12 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 <section id="empty-home" aria-label="Mineradio home">
   <div class="empty-home-shell">
     <div class="home-hero">
-      <div class="home-hero-inner home-construction-inner">
-        <div class="home-title home-construction-title">🚧此处施工，敬请期待🚧</div>
-        <button class="home-chip home-console-chip" type="button" onclick="openHomePlayerConsole()">展开播放器控制台</button>
+      <div class="home-hero-inner home-comment-inner">
+        <div id="home-hot-comment" class="home-hot-comment" aria-live="polite"></div>
+        <div class="home-comment-actions">
+          <button class="home-chip home-comment-refresh" type="button" onclick="loadHomeHotComment(true)">换一首</button>
+          <button class="home-chip home-console-chip" type="button" onclick="openHomePlayerConsole()">展开播放器控制台</button>
+        </div>
       </div>
     </div>
 
@@ -15680,6 +15701,145 @@ function renderHomeTiles() {
   row._homeTiles = tiles;
   renderHomeMosaic(tiles);
 }
+// ================= 主界面 Hero 随机热评 =================
+var homeHotCommentState = { loading: false, loaded: false, song: null, comment: null, provider: '', error: '' };
+var homeHotCommentToken = 0;
+function pickRandom(arr) {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+// 一组热门关键词，任何平台取不到歌池时用来随机搜索兜底
+var HOME_COMMENT_FALLBACK_KEYWORDS = ['周杰伦', '陈奕迅', '林俊杰', '邓紫棋', '五月天', 'Taylor Swift', '告白气球', '晴天', '起风了', '孤勇者', '海阔天空', '稻香'];
+async function fetchRandomSongForProvider(provider) {
+  try {
+    if (provider === 'netease') {
+      if (!homeDiscoverState.loaded) { try { await loadHomeDiscover(false); } catch (e) {} }
+      var neSong = pickRandom(homeDiscoverState.songs);
+      if (neSong) return cloneSong(neSong);
+      var neKw = pickRandom(HOME_COMMENT_FALLBACK_KEYWORDS);
+      var neSearch = await apiJson('/api/search?keywords=' + encodeURIComponent(neKw) + '&limit=20');
+      return cloneSong(pickRandom((neSearch && neSearch.songs) || []));
+    }
+    if (provider === 'kugou') {
+      var src = window.MineradioKugouSource;
+      if (src && src.dailyUrl) {
+        try {
+          var kgDaily = await apiJson(src.dailyUrl());
+          var kgSong = pickRandom((kgDaily && kgDaily.songs) || []);
+          if (kgSong) return cloneSong(kgSong);
+        } catch (e) {}
+      }
+      var kgKw = pickRandom(HOME_COMMENT_FALLBACK_KEYWORDS);
+      var kgSearch = await apiJson((src && src.searchUrl) ? src.searchUrl(kgKw, 20) : ('/api/kugou/search?keywords=' + encodeURIComponent(kgKw) + '&limit=20'));
+      return cloneSong(pickRandom((kgSearch && kgSearch.songs) || []));
+    }
+    // qq
+    var qqKw = pickRandom(HOME_COMMENT_FALLBACK_KEYWORDS);
+    var qqSearch = await apiJson('/api/qq/search?keywords=' + encodeURIComponent(qqKw) + '&limit=20');
+    return cloneSong(pickRandom((qqSearch && qqSearch.songs) || []));
+  } catch (e) {
+    console.warn('[HomeHotComment] pick song failed:', e);
+    return null;
+  }
+}
+function homeCommentUrlForSong(song, provider) {
+  if (provider === 'qq') {
+    return '/api/qq/song/comments?id=' + encodeURIComponent(song.qqId || '') +
+      '&mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&limit=20';
+  }
+  if (provider === 'kugou') {
+    return window.MineradioKugouSource.commentsUrl(song, 20);
+  }
+  return '/api/song/comments?id=' + encodeURIComponent(song.id || '') + '&limit=20';
+}
+function pickHottestComment(list) {
+  var arr = (list || []).filter(function(c){ return c && c.content && String(c.content).trim(); });
+  if (!arr.length) return null;
+  arr.sort(function(a, b){ return (Number(b.likedCount) || 0) - (Number(a.likedCount) || 0); });
+  return arr[0];
+}
+async function loadHomeHotComment(force) {
+  if (homeHotCommentState.loading) return;
+  // 登录态与上次缓存不一致时强制刷新（如未登录占位 → 登录后应出现真实热评）
+  var loggedInNow = hasAnyPlatformLogin();
+  var wasNoLogin = homeHotCommentState.loaded && homeHotCommentState.error === 'NO_LOGIN';
+  if (loggedInNow && wasNoLogin) force = true;
+  if (homeHotCommentState.loaded && !force) { renderHomeHotComment(); return; }
+  if (!loggedInNow) {
+    homeHotCommentState = { loading: false, loaded: true, song: null, comment: null, provider: '', error: 'NO_LOGIN' };
+    renderHomeHotComment();
+    return;
+  }
+  var token = ++homeHotCommentToken;
+  homeHotCommentState.loading = true;
+  homeHotCommentState.error = '';
+  renderHomeHotComment();
+  var provider = preferredMusicProvider();
+  var found = null;
+  // 最多尝试 5 首，直到拿到一条有内容的热评
+  for (var attempt = 0; attempt < 5 && !found; attempt++) {
+    if (token !== homeHotCommentToken) return;
+    var song = await fetchRandomSongForProvider(provider);
+    if (!song) continue;
+    try {
+      var r = await apiJson(homeCommentUrlForSong(song, provider));
+      if (token !== homeHotCommentToken) return;
+      if (r && !r.error) {
+        var best = pickHottestComment(r.comments);
+        if (best) found = { song: song, comment: best, provider: provider };
+      }
+    } catch (e) { /* 换下一首 */ }
+  }
+  if (token !== homeHotCommentToken) return;
+  if (found) {
+    homeHotCommentState = { loading: false, loaded: true, song: found.song, comment: found.comment, provider: found.provider, error: '' };
+  } else {
+    homeHotCommentState = { loading: false, loaded: true, song: null, comment: null, provider: provider, error: 'EMPTY' };
+  }
+  renderHomeHotComment();
+}
+function renderHomeHotComment() {
+  var box = document.getElementById('home-hot-comment');
+  if (!box) return;
+  var st = homeHotCommentState;
+  if (st.loading) {
+    box.innerHTML = '<div class="hhc-state">正在从你听的平台里挑一首歌和它的高赞评论…</div>';
+    return;
+  }
+  if (st.error === 'NO_LOGIN') {
+    box.innerHTML = '<div class="hhc-state">登录网易云 / QQ 音乐 / 酷狗任一平台后，这里会随机展示一首歌和它的一条高热度评论。</div>';
+    return;
+  }
+  if (st.error || !st.song || !st.comment) {
+    box.innerHTML = '<div class="hhc-state">这会儿没找到合适的热评，点「换一首」再试试。</div>';
+    return;
+  }
+  var song = st.song;
+  var c = st.comment;
+  var user = c.user || {};
+  var cover = songCoverSrc(song, 120);
+  var avatar = user.avatar ? coverUrlWithSize(user.avatar, 64) : '';
+  var tagLabel = st.provider === 'qq' ? 'QQ 音乐' : (st.provider === 'kugou' ? '酷狗音乐' : '网易云音乐');
+  var metaBits = [];
+  if (song.artist) metaBits.push(escHtml(song.artist));
+  metaBits.push('<span class="hhc-tag">' + escHtml(tagLabel) + '</span>');
+  var likeLabel = (Number(c.likedCount) || 0) > 0 ? ('<span class="hhc-like">♥ ' + c.likedCount + '</span>') : '';
+  box.innerHTML =
+    '<div class="hhc-head">' +
+      (cover ? '<img class="hhc-cover" src="' + escHtml(cover) + '" alt="" onerror="this.style.opacity=.2">' : '<div class="hhc-cover"></div>') +
+      '<div class="hhc-song">' +
+        '<div class="hhc-song-name">' + escHtml(song.name || '未知歌曲') + '</div>' +
+        '<div class="hhc-song-meta">' + metaBits.join(' ') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="hhc-quote">' +
+      (avatar ? '<img class="hhc-avatar" src="' + escHtml(avatar) + '" alt="" onerror="this.style.opacity=.2">' : '<div class="hhc-avatar"></div>') +
+      '<div class="hhc-body">' +
+        '<div class="hhc-user">' + escHtml(user.nickname || '音乐用户') + (likeLabel ? (' · ' + likeLabel) : '') + '</div>' +
+        '<div class="hhc-text">' + escHtml(c.content || '') + '</div>' +
+      '</div>' +
+    '</div>';
+}
 function renderHomeDiscover() {
   var sub = document.getElementById('home-subtitle');
   var loggedOutHome = !homeDiscoverState.loggedIn && !hasAnyPlatformLogin();
@@ -15762,6 +15922,8 @@ function renderHomeDiscover() {
     setHomeArt('home-library-art', cardSongC && cardSongC.cover || summary.topSong && summary.topSong.cover || summary.recent && summary.recent.cover || podcastItem && podcastItem.cover, 280);
   }
   renderHomeTiles();
+  // 首次渲染主界面时加载 hero 随机热评（已加载过则复用，不重复请求）
+  loadHomeHotComment(false);
 }
 async function loadHomeDiscover(force) {
   if (homeDiscoverState.loading) return;
